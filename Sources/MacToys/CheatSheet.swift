@@ -18,6 +18,9 @@ final class CheatSheetWindow {
     private let rows: [Row] = [
         Row(windowsKey: "Win + V",           what: "Clipboard history",              macKey: "⇧⌘V"),
         Row(windowsKey: "Win + Shift + S",   what: "Screenshot to clipboard",        macKey: "⇧⌘S"),
+        Row(windowsKey: "Win + Shift + T",   what: "Grab text off the screen (OCR)",  macKey: "⌃⌥T"),
+        Row(windowsKey: "Win + Shift + C",   what: "Pick a colour, copy as hex",      macKey: "⌃⌥K"),
+        Row(windowsKey: "Ctrl + Shift + V",  what: "Paste without formatting",        macKey: "⇧⌥⌘V"),
         Row(windowsKey: "Win + ←",           what: "Snap window left (press again for ⅓, ⅔)", macKey: "⌃⌥←"),
         Row(windowsKey: "Win + →",           what: "Snap window right",              macKey: "⌃⌥→"),
         Row(windowsKey: "Win + ↑",           what: "Maximize window (not full screen)", macKey: "⌃⌥↑"),

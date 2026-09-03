@@ -22,6 +22,10 @@ final class KeyRemapper {
 
     private(set) var isRunning = false
 
+    /// Retained so repeated start/stop cycles do not stack up duplicate
+    /// observers, each firing the same handler again.
+    private var frontmostObserver: NSObjectProtocol?
+
     // MARK: - Lifecycle
 
     /// Returns false when Accessibility has not been granted; the caller is
@@ -87,7 +91,8 @@ final class KeyRemapper {
     /// outright, so it must not make cross-process calls.
     private func observeFrontmostApp() {
         frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        NSWorkspace.shared.notificationCenter.addObserver(
+        guard frontmostObserver == nil else { return }
+        frontmostObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main

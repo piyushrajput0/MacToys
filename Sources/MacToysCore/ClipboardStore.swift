@@ -83,10 +83,18 @@ public struct ClipItem: Codable, Identifiable, Equatable {
 /// survives indefinitely.
 public final class ClipboardStore {
     public private(set) var items: [ClipItem] = []
-    public let capacity: Int
+    public private(set) var capacity: Int
 
     public init(capacity: Int = 100) {
         self.capacity = max(1, capacity)
+    }
+
+    /// Resizing takes effect immediately: shrinking evicts down to the new limit
+    /// rather than waiting for the next copy, so the setting visibly does what
+    /// it says.
+    public func setCapacity(_ newValue: Int) {
+        capacity = min(max(newValue, 1), 10_000)
+        evict()
     }
 
     @discardableResult

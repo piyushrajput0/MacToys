@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let remapper = KeyRemapper()
     private let awake = AwakeService()
     private let cheatSheet = CheatSheetWindow()
+    private var settings: SettingsWindowController!
 
     private var panel: ClipboardPanelController!
     private var statusItem: NSStatusItem!
@@ -29,9 +30,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // Captured before anything writes the file, or the first-run check below
+        // would always be false.
+        let firstRun = isFirstRun
+
+        // Rewrite the config on launch so options added in a newer version show
+        // up in the file the user can actually see and edit. The decoder already
+        // filled in defaults for anything missing.
+        try? preferences.save()
+
         loadHistory()
 
         panel = ClipboardPanelController(store: store, watcher: watcher, preferences: preferences)
+        settings = SettingsWindowController(preferences: preferences)
+        settings.onChange = { [weak self] updated in self?.apply(updated) }
 
         startClipboard()
         registerHotKeys()
@@ -50,9 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !hotKeys.conflicts.isEmpty {
             Toast.show("Some shortcuts were already taken: \(hotKeys.conflicts.joined(separator: ", "))", duration: 4)
         }
-        if isFirstRun {
+        if firstRun {
             cheatSheet.show()
-            markFirstRunComplete()
         }
     }
 
@@ -67,10 +78,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var isFirstRun: Bool {
         !FileManager.default.fileExists(atPath: Preferences.preferencesURL.path)
-    }
-
-    private func markFirstRunComplete() {
-        try? preferences.save()
     }
 
     // MARK: - Clipboard
@@ -168,6 +175,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hotKeys.register(spec, name: "Snip to Clipboard") { SnipService.capture(.region) }
         }
 
+        if let spec = preferences.spec("pasteAsPlainText") {
+            hotKeys.register(spec, name: "Paste as Plain Text") { [weak self] in self?.pasteAsPlainText() }
+        }
+
+        if preferences.textExtractorEnabled, let spec = preferences.spec("textExtract") {
+            hotKeys.register(spec, name: "Extract Text") { [weak self] in self?.extractText() }
+        }
+
+        if preferences.colorPickerEnabled, let spec = preferences.spec("colorPicker") {
+            hotKeys.register(spec, name: "Pick Colour") { [weak self] in self?.pickColour() }
+        }
+
         guard preferences.windowSnapEnabled else { return }
 
         let snaps: [(String, SnapAction)] = [
@@ -229,6 +248,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Clipboard extras
+
+    /// Windows users reach for Ctrl+Shift+V everywhere; on macOS "paste and
+    /// match style" only exists in some apps, under shortcuts that differ.
+    /// Stripping the clipboard itself works in every app.
+    private func pasteAsPlainText() {
+        guard watcher.stripFormatting() != nil else {
+            Toast.show("Nothing on the clipboard to paste")
+            return
+        }
+        guard Permissions.accessibilityGranted else {
+            Toast.show("Formatting removed — press ⌘V to paste")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { KeyRemapper.sendPaste() }
+    }
+
+    private func extractText() {
+        TextExtractor.extract(languages: preferences.ocrLanguages,
+                              joinLines: preferences.ocrJoinLines) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let text):
+                self.watcher.writeText(text)
+                // Recognised text is worth keeping in history even though the
+                // app wrote it, so it is inserted explicitly.
+                self.store.insert(ClipItem(kind: .text, text: text, sourceApp: "Text Extractor"))
+                self.scheduleSave()
+                let lines = text.components(separatedBy: "\n").count
+                Toast.show("Copied \(text.count) characters (\(lines) line\(lines == 1 ? "" : "s"))")
+            case .failure(let error):
+                if let message = error.errorDescription { Toast.show(message) }
+            }
+        }
+    }
+
+    private func pickColour() {
+        ColorPickerService.pick(format: preferences.colorFormat) { [weak self] text, _ in
+            guard let self = self, let text = text else { return }
+            self.watcher.writeText(text)
+            self.store.insert(ClipItem(kind: .text, text: text, sourceApp: "Colour Picker"))
+            self.scheduleSave()
+            Toast.show("Copied \(text)")
+        }
+    }
+
+    // MARK: - Applying changed preferences
+
+    /// Re-applies the whole configuration without a relaunch.
+    private func apply(_ updated: Preferences) {
+        let previous = preferences
+        preferences = updated.normalised()
+        try? preferences.save()
+
+        store.setCapacity(preferences.clipboardCapacity)
+        watcher.excludedApps = preferences.excludedApps
+
+        if preferences.clipboardHistoryEnabled {
+            if !previous.clipboardHistoryEnabled
+                || previous.clipboardPollInterval != preferences.clipboardPollInterval {
+                watcher.start(interval: preferences.clipboardPollInterval)
+            }
+        } else {
+            watcher.stop()
+        }
+
+        if preferences.keyRemapEnabled {
+            if remapper.isRunning {
+                remapper.update(config: preferences.remap)
+            } else if Permissions.accessibilityGranted {
+                remapper.start(config: preferences.remap)
+            }
+        } else if remapper.isRunning {
+            remapper.stop()
+        }
+
+        if previous.launchAtLogin != preferences.launchAtLogin {
+            applyLaunchAtLogin()
+        }
+
+        panel.update(preferences: preferences)
+        registerHotKeys()
+        saveHistory()
+        rebuildMenu()
+    }
+
+    private func applyLaunchAtLogin() {
+        guard #available(macOS 13.0, *) else { return }
+        do {
+            if preferences.launchAtLogin {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            // Registration only works from a signed bundle in a normal location;
+            // say so rather than leaving a checkbox that silently lies.
+            preferences.launchAtLogin = false
+            try? preferences.save()
+            settings.update(preferences: preferences)
+            Toast.show("Move MacToys to /Applications to launch it at login", duration: 3)
+        }
+    }
+
     // MARK: - Key remapping
 
     private func startRemapperIfEnabled() {
@@ -252,6 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         try? preferences.save()
+        settings.update(preferences: preferences)
         rebuildMenu()
     }
 
@@ -288,6 +412,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add("Clipboard History   \(preferences.spec("clipboardHistory")?.description ?? "")", #selector(showClipboard))
         add("Snip to Clipboard   \(preferences.spec("snipToClipboard")?.description ?? "")", #selector(snipRegion))
         add("Snip a Window", #selector(snipWindow))
+        add("Extract Text (OCR)   \(preferences.spec("textExtract")?.description ?? "")", #selector(extractTextFromMenu))
+        add("Pick a Colour   \(preferences.spec("colorPicker")?.description ?? "")", #selector(pickColourFromMenu))
+        add("Paste as Plain Text   \(preferences.spec("pasteAsPlainText")?.description ?? "")", #selector(pastePlainFromMenu))
 
         menu.addItem(.separator())
 
@@ -327,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : "Accessibility: not granted — click to fix"
         add(permissionTitle, Permissions.accessibilityGranted ? nil : #selector(openAccessibility))
 
+        add("Settings…", #selector(showSettings), key: ",")
         add("Cheat Sheet…", #selector(showCheatSheet))
         add("Open Config Folder", #selector(openConfigFolder))
         add("Clear Clipboard History", #selector(clearHistory))
@@ -345,6 +473,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func snipWindow() { SnipService.capture(.window) }
     @objc private func nextDisplay() { moveDisplay(forward: true) }
     @objc private func showCheatSheet() { cheatSheet.show() }
+    @objc private func showSettings() { settings.update(preferences: preferences); settings.show() }
+    @objc private func extractTextFromMenu() { extractText() }
+    @objc private func pickColourFromMenu() { pickColour() }
+    @objc private func pastePlainFromMenu() { pasteAsPlainText() }
     @objc private func openAccessibility() { Permissions.openAccessibilitySettings() }
 
     @objc private func snapFromMenu(_ sender: NSMenuItem) {
@@ -377,21 +509,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLaunchAtLogin() {
         preferences.launchAtLogin.toggle()
-        if #available(macOS 13.0, *) {
-            do {
-                if preferences.launchAtLogin {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
-            } catch {
-                // Registration only works from a signed bundle in /Applications;
-                // say so instead of leaving a checkbox that silently lies.
-                preferences.launchAtLogin.toggle()
-                Toast.show("Move MacToys to /Applications first", duration: 3)
-            }
-        }
+        applyLaunchAtLogin()
         try? preferences.save()
+        settings.update(preferences: preferences)
         rebuildMenu()
     }
 

@@ -4,6 +4,22 @@ import MacToysCore
 
 let t = TinyTest()
 
+/// Mirrors `SettingsWindowController.serialise`, which lives in the app target
+/// and so cannot be imported here.
+func serialiseSpec(_ spec: HotKeySpec) -> String {
+    var parts: [String] = []
+    if spec.mods.contains(.control) { parts.append("ctrl") }
+    if spec.mods.contains(.option)  { parts.append("alt") }
+    if spec.mods.contains(.shift)   { parts.append("shift") }
+    if spec.mods.contains(.command) { parts.append("cmd") }
+    if let name = KeyCode.named.first(where: { $0.value == spec.keyCode })?.key { parts.append(name) }
+    else if let l = KeyCode.letters.first(where: { $0.value == spec.keyCode })?.key { parts.append(l) }
+    else if let d = KeyCode.digits.first(where: { $0.value == spec.keyCode })?.key { parts.append(d) }
+    else { return "" }
+    return parts.joined(separator: "+")
+}
+
+
 // ───────────────────────────────────────────────────────────── HotKeySpec ────
 t.group("HotKeySpec parsing")
 
@@ -470,6 +486,260 @@ t.test("survives a JSON round trip") {
     let data = try JSONEncoder().encode(p)
     let back = try JSONDecoder().decode(Preferences.self, from: data)
     t.equal(back, p)
+}
+
+
+// ─────────────────────────────────────────────────────────── PasteboardGate ────
+t.group("PasteboardGate")
+
+t.test("an unchanged count is not a copy") {
+    var g = PasteboardGate(changeCount: 7)
+    t.equal(g.observe(7), .unchanged)
+}
+
+t.test("a change from another app is recorded") {
+    var g = PasteboardGate(changeCount: 7)
+    t.equal(g.observe(8), .record)
+}
+
+t.test("our own write is skipped exactly once") {
+    var g = PasteboardGate(changeCount: 7)
+    g.noteOwnWrite(resultingChangeCount: 8)
+    t.equal(g.observe(8), .skipOwnWrite, "the paste we caused must not be re-recorded")
+}
+
+t.test("REGRESSION: the copy after a paste is still recorded") {
+    // The original bug: write() set a skip flag *and* fast-forwarded the
+    // counter, so the flag was never consumed and silently ate the user's next
+    // copy. Every paste from history cost you the next thing you copied.
+    var g = PasteboardGate(changeCount: 7)
+    g.noteOwnWrite(resultingChangeCount: 8)
+    t.equal(g.observe(8), .skipOwnWrite, "our paste")
+    t.equal(g.observe(9), .record, "the user's NEXT copy must not be swallowed")
+    t.expect(!g.hasPendingOwnWrite, "the marker must be cleared after use")
+}
+
+t.test("many pastes in a row do not accumulate skips") {
+    var g = PasteboardGate(changeCount: 0)
+    for i in 1...5 {
+        g.noteOwnWrite(resultingChangeCount: i)
+        t.equal(g.observe(i), .skipOwnWrite, "paste \(i)")
+    }
+    t.equal(g.observe(6), .record, "a real copy after five pastes")
+}
+
+t.test("a stale marker cannot suppress an unrelated copy") {
+    // Another app writes before our own change is observed, so the count we
+    // were expecting never arrives.
+    var g = PasteboardGate(changeCount: 7)
+    g.noteOwnWrite(resultingChangeCount: 8)
+    t.equal(g.observe(12), .record, "someone else's copy must still be recorded")
+    t.expect(!g.hasPendingOwnWrite, "the never-matched marker must not linger")
+    t.equal(g.observe(13), .record, "and must not suppress the one after it either")
+}
+
+t.test("tracks the last observed count") {
+    var g = PasteboardGate(changeCount: 3)
+    _ = g.observe(9)
+    t.equal(g.lastObserved, 9)
+}
+
+// ───────────────────────────────────────────────────────── ColorFormatter ────
+t.group("ColorFormatter")
+
+t.test("formats hex in both cases") {
+    t.equal(ColorFormatter.string(red: 74/255, green: 144/255, blue: 217/255, format: .hex), "#4A90D9")
+    t.equal(ColorFormatter.string(red: 74/255, green: 144/255, blue: 217/255, format: .hexLower), "#4a90d9")
+}
+
+t.test("formats pure black and white without rounding drift") {
+    t.equal(ColorFormatter.string(red: 0, green: 0, blue: 0, format: .hex), "#000000")
+    t.equal(ColorFormatter.string(red: 1, green: 1, blue: 1, format: .hex), "#FFFFFF")
+}
+
+t.test("formats CSS functions") {
+    t.equal(ColorFormatter.string(red: 74/255, green: 144/255, blue: 217/255, format: .rgb), "rgb(74, 144, 217)")
+    t.equal(ColorFormatter.string(red: 1, green: 0, blue: 0, alpha: 1, format: .rgba), "rgba(255, 0, 0, 1)")
+    t.equal(ColorFormatter.string(red: 1, green: 0, blue: 0, alpha: 0.5, format: .rgba), "rgba(255, 0, 0, 0.50)")
+}
+
+t.test("clamps out-of-gamut components instead of emitting nonsense") {
+    // A wide-gamut display profile can hand back components outside 0...1.
+    let s = ColorFormatter.string(red: 1.4, green: -0.2, blue: 0.5, format: .hex)
+    t.equal(s, "#FF0080", "must clamp rather than overflow or go negative")
+    t.expect(s.count == 7, "hex must stay six digits")
+}
+
+t.test("hsl matches known values") {
+    let (h1, s1, l1) = ColorFormatter.hsl(r: 1, g: 0, b: 0)
+    t.nearlyEqual(h1, 0, tolerance: 0.5, "red hue")
+    t.nearlyEqual(s1, 1, tolerance: 0.01, "red saturation")
+    t.nearlyEqual(l1, 0.5, tolerance: 0.01, "red lightness")
+
+    let (h2, _, _) = ColorFormatter.hsl(r: 0, g: 1, b: 0)
+    t.nearlyEqual(h2, 120, tolerance: 0.5, "green hue")
+    let (h3, _, _) = ColorFormatter.hsl(r: 0, g: 0, b: 1)
+    t.nearlyEqual(h3, 240, tolerance: 0.5, "blue hue")
+}
+
+t.test("grey has no hue rather than a garbage one") {
+    let (h, s, l) = ColorFormatter.hsl(r: 0.5, g: 0.5, b: 0.5)
+    t.nearlyEqual(h, 0, tolerance: 0.001)
+    t.nearlyEqual(s, 0, tolerance: 0.001, "grey must be unsaturated")
+    t.nearlyEqual(l, 0.5, tolerance: 0.001)
+}
+
+t.test("every format produces something non-empty") {
+    for f in ColorFormat.allCases {
+        t.expect(!ColorFormatter.string(red: 0.2, green: 0.4, blue: 0.6, format: f).isEmpty,
+                 "\(f) produced nothing")
+    }
+}
+
+// ─────────────────────────────────────────────────────── OCRTextAssembler ────
+t.group("OCRTextAssembler")
+
+t.test("keeps the original layout when joining is off") {
+    t.equal(OCRTextAssembler.assemble(["one", "two", "three"], joinLines: false), "one\ntwo\nthree")
+}
+
+t.test("drops blank observations") {
+    t.equal(OCRTextAssembler.assemble(["one", "   ", "", "two"], joinLines: false), "one\ntwo")
+}
+
+t.test("rejoins a wrapped sentence") {
+    t.equal(OCRTextAssembler.assemble(["The quick brown", "fox jumps over"], joinLines: true),
+            "The quick brown fox jumps over")
+}
+
+t.test("keeps a break after a finished sentence") {
+    t.equal(OCRTextAssembler.assemble(["First sentence.", "Second one"], joinLines: true),
+            "First sentence.\nSecond one")
+}
+
+t.test("keeps list items on their own lines") {
+    t.equal(OCRTextAssembler.assemble(["Shopping", "- milk", "- eggs"], joinLines: true),
+            "Shopping\n- milk\n- eggs")
+    t.equal(OCRTextAssembler.assemble(["Steps", "1. open it", "2. close it"], joinLines: true),
+            "Steps\n1. open it\n2. close it")
+}
+
+t.test("reunites a word split across a line break") {
+    t.equal(OCRTextAssembler.assemble(["some inter-", "national text"], joinLines: true),
+            "some international text")
+}
+
+t.test("a trailing dash that is punctuation is not treated as a split word") {
+    t.equal(OCRTextAssembler.assemble(["a dash -", "then more"], joinLines: true), "a dash - then more")
+}
+
+t.test("recognises numbered list markers") {
+    t.expect(OCRTextAssembler.isNumberedItem("12. thing"))
+    t.expect(OCRTextAssembler.isNumberedItem("3) thing"))
+    t.expect(!OCRTextAssembler.isNumberedItem("3 thing"), "a bare number is not a list marker")
+    t.expect(!OCRTextAssembler.isNumberedItem("thing"))
+}
+
+t.test("empty input is handled") {
+    t.equal(OCRTextAssembler.assemble([], joinLines: true), "")
+    t.equal(OCRTextAssembler.assemble([], joinLines: false), "")
+}
+
+// ────────────────────────────────────────────── ClipboardStore capacity ────
+t.group("ClipboardStore resizing")
+
+t.test("shrinking the limit evicts immediately") {
+    let store = ClipboardStore(capacity: 10)
+    for i in 1...8 { store.insert(item("item\(i)", at: TimeInterval(i))) }
+    store.setCapacity(3)
+    t.equal(store.items.count, 3, "must evict as soon as the limit changes")
+    t.equal(store.items.first?.text, "item8", "the newest must survive")
+}
+
+t.test("growing the limit keeps everything") {
+    let store = ClipboardStore(capacity: 3)
+    for i in 1...5 { store.insert(item("item\(i)", at: TimeInterval(i))) }
+    store.setCapacity(50)
+    t.equal(store.items.count, 3, "already-evicted items do not come back")
+    store.insert(item("item6", at: 6))
+    t.equal(store.items.count, 4, "but new ones are kept")
+}
+
+t.test("a nonsense capacity is clamped") {
+    let store = ClipboardStore(capacity: 10)
+    store.setCapacity(0)
+    t.equal(store.capacity, 1)
+    store.setCapacity(999_999)
+    t.equal(store.capacity, 10_000)
+}
+
+t.test("shrinking never discards a pinned item") {
+    let store = ClipboardStore(capacity: 10)
+    for i in 1...8 { store.insert(item("item\(i)", at: TimeInterval(i))) }
+    _ = store.togglePin(id: store.items.first(where: { $0.text == "item1" })!.id)
+    store.setCapacity(2)
+    t.expect(store.items.contains { $0.text == "item1" }, "a pinned item must survive resizing")
+}
+
+// ────────────────────────────────────── Preferences forward compatibility ────
+t.group("Preferences upgrades")
+
+t.test("a config file from an older version still loads") {
+    // Exactly the keys the first release wrote — none of the newer ones.
+    let old = """
+    {"autoPasteOnPick":false,"clipboardCapacity":42,"clipboardHistoryEnabled":true,
+     "clipboardPollInterval":0.4,"excludedApps":[],"keyRemapEnabled":true,
+     "launchAtLogin":false,"persistClipboardHistory":true,
+     "remap":{"finderCutPaste":true,"finderForwardDelete":true,"homeEndExcludedApps":[],"windowsHomeEnd":true},
+     "shortcuts":{"clipboardHistory":"cmd+shift+b"},"snapCyclingEnabled":true,"snapGap":8,
+     "snipEnabled":true,"windowSnapEnabled":true}
+    """
+    let p = try JSONDecoder().decode(Preferences.self, from: Data(old.utf8))
+    t.equal(p.clipboardCapacity, 42, "existing settings must be preserved")
+    t.equal(p.snapGap, 8.0, "existing settings must be preserved")
+    t.expect(p.autoPasteOnPick == false, "an explicitly disabled setting must stay disabled")
+    t.equal(p.colorFormat, .hex, "a new setting must fall back to its default")
+    t.expect(p.textExtractorEnabled, "a new feature must default to on, not off")
+}
+
+t.test("a customised shortcut survives an upgrade, and new ones appear") {
+    let old = #"{"shortcuts":{"clipboardHistory":"cmd+shift+b"}}"#
+    let p = try JSONDecoder().decode(Preferences.self, from: Data(old.utf8))
+    t.equal(p.spec("clipboardHistory"), HotKeySpec.parse("cmd+shift+b"), "the user's binding must be kept")
+    t.expect(p.spec("colorPicker") != nil, "a shortcut added in a later version must appear")
+}
+
+t.test("a truncated or corrupt config does not throw away every setting") {
+    let p = try JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
+    t.equal(p.clipboardCapacity, Preferences().clipboardCapacity)
+    t.expect(p.spec("clipboardHistory") != nil)
+}
+
+t.test("round trip still works with the new fields") {
+    var p = Preferences()
+    p.colorFormat = .hsl
+    p.ocrJoinLines = true
+    p.textExtractorEnabled = false
+    let back = try JSONDecoder().decode(Preferences.self, from: try JSONEncoder().encode(p))
+    t.equal(back, p)
+}
+
+// ─────────────────────────────────────────── Shortcut recorder round trip ────
+t.group("Shortcut serialisation")
+
+t.test("every default shortcut survives parse then re-serialise") {
+    // The settings recorder writes shortcuts back as text; a binding that does
+    // not round trip would silently change when the window is opened.
+    for (name, raw) in Preferences.defaultShortcuts {
+        guard let spec = HotKeySpec.parse(raw) else {
+            t.expect(false, "\(name) failed to parse"); continue
+        }
+        let text = serialiseSpec(spec)
+        guard let reparsed = HotKeySpec.parse(text) else {
+            t.expect(false, "\(name) re-serialised to unparseable \"\(text)\""); continue
+        }
+        t.equal(reparsed, spec, "\(name) changed across a round trip")
+    }
 }
 
 exit(t.report())

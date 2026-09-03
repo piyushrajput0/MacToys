@@ -10,12 +10,12 @@ import MacToysCore
 final class ClipboardWatcher: NSObject {
 
     private var timer: Timer?
-    private var lastChangeCount: Int
     private let pasteboard: NSPasteboard
 
-    /// Set while the app writes to the pasteboard itself, so pasting from the
-    /// history does not re-record the item and shuffle it to the top.
-    private var ignoreNextChange = false
+    /// Decides which observed changes are genuine copies and which are this
+    /// app's own writes. The bookkeeping lives in `MacToysCore` so it can be
+    /// tested without a pasteboard.
+    private var gate: PasteboardGate
 
     var onNewItem: ((ClipItem) -> Void)?
     /// Fired for any change, including ones that were not recorded.
@@ -33,7 +33,7 @@ final class ClipboardWatcher: NSObject {
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
-        self.lastChangeCount = pasteboard.changeCount
+        self.gate = PasteboardGate(changeCount: pasteboard.changeCount)
         super.init()
         trackFrontmostApp()
     }
@@ -76,25 +76,18 @@ final class ClipboardWatcher: NSObject {
         timer = nil
     }
 
-    /// Call immediately before writing to the pasteboard from within the app.
-    func suppressNextChange() {
-        ignoreNextChange = true
-    }
-
     private func poll() {
-        let count = pasteboard.changeCount
-        guard count != lastChangeCount else { return }
-        lastChangeCount = count
-
-        onAnyChange?()
-
-        if ignoreNextChange {
-            ignoreNextChange = false
+        switch gate.observe(pasteboard.changeCount) {
+        case .unchanged:
             return
+        case .skipOwnWrite:
+            // Our own paste-from-history. Not a new copy, but it does still
+            // invalidate a pending Finder cut.
+            onAnyChange?()
+        case .record:
+            onAnyChange?()
+            if let item = readCurrentItem() { onNewItem?(item) }
         }
-
-        guard let item = readCurrentItem() else { return }
-        onNewItem?(item)
     }
 
     private func readCurrentItem() -> ClipItem? {
@@ -132,7 +125,6 @@ final class ClipboardWatcher: NSObject {
 
     /// Puts an item back on the clipboard.
     func write(_ item: ClipItem) {
-        suppressNextChange()
         pasteboard.clearContents()
 
         switch item.kind {
@@ -144,6 +136,28 @@ final class ClipboardWatcher: NSObject {
             let urls = item.filePaths.map { URL(fileURLWithPath: $0) as NSURL }
             if !urls.isEmpty { pasteboard.writeObjects(urls) }
         }
-        lastChangeCount = pasteboard.changeCount
+        gate.noteOwnWrite(resultingChangeCount: pasteboard.changeCount)
+    }
+
+    /// Replaces the clipboard with its own plain-text rendering, dropping fonts,
+    /// colours and every other flavour the source app attached.
+    ///
+    /// Windows users reach for Ctrl+Shift+V constantly; on macOS "paste and
+    /// match style" exists only in some apps and under different shortcuts.
+    /// Returns nil when there is no text to strip.
+    @discardableResult
+    func stripFormatting() -> String? {
+        guard let text = pasteboard.string(forType: .string) else { return nil }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        gate.noteOwnWrite(resultingChangeCount: pasteboard.changeCount)
+        return text
+    }
+
+    /// Puts arbitrary text on the clipboard without recording it as a new copy.
+    func writeText(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        gate.noteOwnWrite(resultingChangeCount: pasteboard.changeCount)
     }
 }

@@ -105,6 +105,10 @@ final class ClipboardPanelController: NSObject, NSTableViewDataSource, NSTableVi
         content.addSubview(scroll)
 
         emptyLabel = NSTextField(labelWithString: "")
+        // labelWithString is single-line by default, so the second line of the
+        // empty-state message was silently clipped.
+        emptyLabel.usesSingleLineMode = false
+        emptyLabel.maximumNumberOfLines = 0
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.font = .systemFont(ofSize: 13)

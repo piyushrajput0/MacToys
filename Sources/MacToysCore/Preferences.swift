@@ -10,6 +10,8 @@ public struct Preferences: Codable, Equatable {
     public var snipEnabled: Bool
     public var windowSnapEnabled: Bool
     public var keyRemapEnabled: Bool
+    public var textExtractorEnabled: Bool
+    public var colorPickerEnabled: Bool
 
     // Clipboard
     public var clipboardCapacity: Int
@@ -22,6 +24,14 @@ public struct Preferences: Codable, Equatable {
     public var snapGap: Double
     public var snapCyclingEnabled: Bool
 
+    // Colour picker
+    public var colorFormat: ColorFormat
+
+    // Text extractor
+    public var ocrLanguages: [String]
+    /// Join wrapped lines back into paragraphs instead of keeping the layout.
+    public var ocrJoinLines: Bool
+
     // Key remapping
     public var remap: RemapConfig
 
@@ -33,6 +43,9 @@ public struct Preferences: Codable, Equatable {
     public static let defaultShortcuts: [String: String] = [
         "clipboardHistory": "cmd+shift+v",
         "snipToClipboard":  "cmd+shift+s",
+        "pasteAsPlainText": "cmd+shift+alt+v",
+        "textExtract":      "ctrl+alt+t",
+        "colorPicker":      "ctrl+alt+k",
         "snapLeft":         "ctrl+alt+left",
         "snapRight":        "ctrl+alt+right",
         "snapUp":           "ctrl+alt+up",
@@ -50,6 +63,8 @@ public struct Preferences: Codable, Equatable {
                 snipEnabled: Bool = true,
                 windowSnapEnabled: Bool = true,
                 keyRemapEnabled: Bool = false,
+                textExtractorEnabled: Bool = true,
+                colorPickerEnabled: Bool = true,
                 clipboardCapacity: Int = 100,
                 clipboardPollInterval: Double = 0.4,
                 persistClipboardHistory: Bool = true,
@@ -57,6 +72,9 @@ public struct Preferences: Codable, Equatable {
                 excludedApps: Set<String> = ClipboardPrivacy.defaultExcludedApps,
                 snapGap: Double = 0,
                 snapCyclingEnabled: Bool = true,
+                colorFormat: ColorFormat = .hex,
+                ocrLanguages: [String] = ["en-US"],
+                ocrJoinLines: Bool = false,
                 remap: RemapConfig = RemapConfig(),
                 shortcuts: [String: String] = Preferences.defaultShortcuts,
                 launchAtLogin: Bool = false) {
@@ -64,6 +82,8 @@ public struct Preferences: Codable, Equatable {
         self.snipEnabled = snipEnabled
         self.windowSnapEnabled = windowSnapEnabled
         self.keyRemapEnabled = keyRemapEnabled
+        self.textExtractorEnabled = textExtractorEnabled
+        self.colorPickerEnabled = colorPickerEnabled
         self.clipboardCapacity = clipboardCapacity
         self.clipboardPollInterval = clipboardPollInterval
         self.persistClipboardHistory = persistClipboardHistory
@@ -71,6 +91,9 @@ public struct Preferences: Codable, Equatable {
         self.excludedApps = excludedApps
         self.snapGap = snapGap
         self.snapCyclingEnabled = snapCyclingEnabled
+        self.colorFormat = colorFormat
+        self.ocrLanguages = ocrLanguages
+        self.ocrJoinLines = ocrJoinLines
         self.remap = remap
         self.shortcuts = shortcuts
         self.launchAtLogin = launchAtLogin
@@ -78,6 +101,40 @@ public struct Preferences: Codable, Equatable {
 
     /// Missing keys fall back to the default binding, so a hand-edited or
     /// older config file cannot leave a feature unreachable.
+    // A config file written by an older version has none of the newer keys.
+    // Synthesised Codable would reject it outright and reset every setting the
+    // user had chosen, so each field falls back to its default instead.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Preferences()
+        func v<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? c.decode(T.self, forKey: key)) ?? fallback
+        }
+        clipboardHistoryEnabled = v(.clipboardHistoryEnabled, d.clipboardHistoryEnabled)
+        snipEnabled             = v(.snipEnabled, d.snipEnabled)
+        windowSnapEnabled       = v(.windowSnapEnabled, d.windowSnapEnabled)
+        keyRemapEnabled         = v(.keyRemapEnabled, d.keyRemapEnabled)
+        textExtractorEnabled    = v(.textExtractorEnabled, d.textExtractorEnabled)
+        colorPickerEnabled      = v(.colorPickerEnabled, d.colorPickerEnabled)
+        clipboardCapacity       = v(.clipboardCapacity, d.clipboardCapacity)
+        clipboardPollInterval   = v(.clipboardPollInterval, d.clipboardPollInterval)
+        persistClipboardHistory = v(.persistClipboardHistory, d.persistClipboardHistory)
+        autoPasteOnPick         = v(.autoPasteOnPick, d.autoPasteOnPick)
+        excludedApps            = v(.excludedApps, d.excludedApps)
+        snapGap                 = v(.snapGap, d.snapGap)
+        snapCyclingEnabled      = v(.snapCyclingEnabled, d.snapCyclingEnabled)
+        colorFormat             = v(.colorFormat, d.colorFormat)
+        ocrLanguages            = v(.ocrLanguages, d.ocrLanguages)
+        ocrJoinLines            = v(.ocrJoinLines, d.ocrJoinLines)
+        remap                   = v(.remap, d.remap)
+        launchAtLogin           = v(.launchAtLogin, d.launchAtLogin)
+        // Merge rather than replace, so a new default shortcut appears for
+        // someone upgrading without wiping the ones they customised.
+        var merged = Preferences.defaultShortcuts
+        for (k, val) in v(.shortcuts, d.shortcuts) { merged[k] = val }
+        shortcuts = merged
+    }
+
     public func spec(_ name: String) -> HotKeySpec? {
         if let raw = shortcuts[name], let parsed = HotKeySpec.parse(raw) { return parsed }
         if let fallback = Preferences.defaultShortcuts[name] { return HotKeySpec.parse(fallback) }
@@ -92,6 +149,7 @@ public struct Preferences: Codable, Equatable {
         p.clipboardCapacity = min(max(p.clipboardCapacity, 1), 1000)
         p.clipboardPollInterval = min(max(p.clipboardPollInterval, 0.1), 5.0)
         p.snapGap = min(max(p.snapGap, 0), 100)
+        if p.ocrLanguages.isEmpty { p.ocrLanguages = ["en-US"] }
         return p
     }
 
@@ -123,14 +181,9 @@ public struct Preferences: Codable, Equatable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(self)
-        // Write via a temporary file so an interrupted save cannot leave a
-        // truncated config that would reset every setting on next launch.
-        let tmp = Preferences.preferencesURL.appendingPathExtension("tmp")
-        try data.write(to: tmp, options: .atomic)
-        _ = try? FileManager.default.replaceItemAt(Preferences.preferencesURL, withItemAt: tmp)
-        if FileManager.default.fileExists(atPath: tmp.path) {
-            try? FileManager.default.removeItem(at: tmp)
-            try data.write(to: Preferences.preferencesURL, options: .atomic)
-        }
+        // `.atomic` already writes to a temporary file and renames it into
+        // place, so an interrupted save cannot leave a truncated config that
+        // would reset every setting on the next launch.
+        try data.write(to: Preferences.preferencesURL, options: .atomic)
     }
 }

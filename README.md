@@ -6,7 +6,7 @@
 
 **The Windows features macOS never shipped — for people who just switched.**
 
-Clipboard history · Screenshot straight to clipboard · Aero-Snap window tiling · Windows keyboard behaviour
+Clipboard history · Screenshot to clipboard · Screen OCR · Colour picker · Aero-Snap tiling · Windows keyboard behaviour
 
 A single menu-bar app. No dependencies. No account. Nothing leaves your Mac.
 
@@ -27,6 +27,8 @@ stop working. Not big things — small ones, many times a day:
 | `Home` / `End` | Jump to start / end of the line | Scrolls the whole document instead |
 | `Ctrl`+`X` on a file | Cut, then paste to move it | Finder has no cut. The move is `⌘C` then `⌘⌥V` — undiscoverable |
 | `Delete` on a file | Deletes it | Nothing. It's `⌘⌫` |
+| `Ctrl`+`Shift`+`V` | Paste without formatting | Only some apps, under different shortcuts |
+| PowerToys `Win`+`Shift`+`T` | Grab text off the screen with OCR | Live Text works in Photos and Preview only |
 
 None of these are missing because they're hard. They're missing because Apple made
 different choices, and there's no built-in way to choose otherwise. MacToys puts
@@ -40,6 +42,9 @@ Everything is keyboard-first and runs from the menu bar.
 |---|---|---|
 | **Clipboard history** | `⇧⌘V` | Searchable, pinnable. Text, images and files. |
 | **Snip to clipboard** | `⇧⌘S` | Drag a region → straight onto the clipboard. |
+| **Extract text (OCR)** | `⌃⌥T` | Drag over anything on screen; the text lands on your clipboard. Runs on-device. |
+| **Colour picker** | `⌃⌥K` | Magnified loupe, copies as hex, `rgb()`, `hsl()`, SwiftUI or NSColor. |
+| **Paste as plain text** | `⇧⌥⌘V` | Strips fonts, colours and links from whatever you copied. |
 | **Snap left / right** | `⌃⌥←` `⌃⌥→` | Press again to cycle ½ → ⅓ → ⅔. |
 | **Maximize / centre** | `⌃⌥↑` `⌃⌥↓` | A real maximize, not full-screen-in-its-own-Space. |
 | **Snap to a corner** | `⌃⌥1`–`⌃⌥4` | |
@@ -48,6 +53,7 @@ Everything is keyboard-first and runs from the menu bar.
 | **Cut & paste files** | `⌘X` then `⌘V` | In Finder. Uses Finder's own move, so undo still works. |
 | **Delete a file** | `⌦` | In Finder. |
 | **Keep awake** | menu | Like PowerToys Awake. |
+| **Settings** | `⌘,` from the menu | Every option, plus a click-and-press shortcut recorder. |
 
 The clipboard picker takes `↑``↓` to move, `⏎` to paste, `⌘1`–`⌘9` to grab an item
 directly, `⌘P` to pin, `⌘⌫` to delete, `esc` to dismiss. Just type to filter.
@@ -71,6 +77,10 @@ make app && open dist/MacToys.app
 
 `make test` runs the test suite. `make clean` removes build output.
 
+Settings live in the menu bar icon → **Settings…**, including a shortcut recorder
+(click a binding, press the keys you want). Everything is also plain JSON at
+`~/Library/Application Support/MacToys/preferences.json` if you prefer.
+
 MacToys lives in the menu bar — there's no Dock icon and no window until you ask
 for one. The cheat sheet opens automatically the first time you run it.
 
@@ -82,8 +92,12 @@ Most of MacToys needs **nothing at all**:
 |---|---|
 | Clipboard history | Window snapping |
 | Snip to clipboard | Move window to next display |
-| Keep awake | Windows `Home`/`End` |
-| Menu bar, cheat sheet | Finder cut/paste and `⌦` |
+| Colour picker | Windows `Home`/`End` |
+| Keep awake, settings, cheat sheet | Finder cut/paste and `⌦` |
+
+Text extraction uses `screencapture`, so the first time you use it macOS will ask
+for **Screen Recording** — the same prompt any screenshot tool triggers. Recognition
+itself runs on-device through Apple's Vision framework; no image ever leaves your Mac.
 
 Accessibility is required for the second column because macOS does not let one app
 move another app's windows, or observe keystrokes, without explicit consent — which
@@ -147,16 +161,32 @@ cached from a workspace notification instead. It also rewrites `keyUp` as well a
 `SIGTERM`, which is what macOS sends agents at shutdown. A dispatch signal source
 catches it and flushes history first.
 
+**Knowing which clipboard change was yours.** macOS will not tell you who wrote to
+the pasteboard, so the app has to recognise its own writes when it pastes from
+history. An early version set a "skip the next change" flag *and* fast-forwarded its
+counter, so the flag was never consumed and silently swallowed the next thing you
+copied. That bookkeeping now lives in `PasteboardGate` in the core module, with a
+named regression test for exactly that sequence.
+
+**Upgrading without resetting your settings.** Synthesised `Codable` rejects a JSON
+file that is missing any field, so adding a single preference would have wiped every
+choice the user had made. `Preferences` decodes field by field with per-field
+fallbacks, and merges new default shortcuts into existing ones rather than replacing
+them.
+
 ## Architecture
 
 ```
 Sources/
   MacToysCore/        Pure logic. No AppKit, no permissions, no I/O.
-    Keys.swift          Shortcut parsing, key codes, modifier sets
-    SnapGeometry.swift  Tiling maths, cycling, coordinate flips, display moves
-    ClipboardStore.swift Ring buffer, dedupe, pinning, ranked search, privacy rules
-    RemapRules.swift    The whole key-remapping policy as one pure function
-    Preferences.swift   Config, validation, atomic persistence
+    Keys.swift            Shortcut parsing, key codes, modifier sets
+    SnapGeometry.swift    Tiling maths, cycling, coordinate flips, display moves
+    ClipboardStore.swift  Ring buffer, dedupe, pinning, ranked search, privacy rules
+    PasteboardGate.swift  Which clipboard changes are ours vs. a real copy
+    RemapRules.swift      The whole key-remapping policy as one pure function
+    ColorFormatting.swift Colour conversion and output formats
+    OCRTextAssembler.swift Rejoining recognised lines into readable text
+    Preferences.swift     Config, validation, upgrades, atomic persistence
   MacToys/            The app. AppKit, Carbon, Accessibility, CGEventTap.
   MacToysSelfTest/    The test suite.
 ```
@@ -172,7 +202,7 @@ config)` — no event tap needed to test it.
 make test
 ```
 
-61 tests, 125 assertions, no permissions and no GUI required. XCTest ships with
+93 tests, 216 assertions, no permissions and no GUI required. XCTest ships with
 Xcode rather than the Command Line Tools, so the suite is a plain executable that
 exits non-zero on failure — which also makes it trivial to run in CI.
 
@@ -181,7 +211,10 @@ thirds and quarters; gap arithmetic; snap cycling with tolerance for apps that
 resize in steps; coordinate-flip involution; multi-display selection and clamping;
 clipboard dedupe, pin-aware eviction, ranked search and round-trip persistence;
 password-manager exclusion; every remap rule including app exclusions and the
-`fn` modifier laptops add to `Home`/`End`; config clamping and fallback.
+`fn` modifier laptops add to `Home`/`End`; config clamping and fallback; the
+pasteboard-ownership state machine including the swallowed-copy regression;
+colour conversion including out-of-gamut clamping; OCR line rejoining; history
+resizing; and loading a config file written by an older version.
 
 ## Limitations
 
@@ -195,6 +228,10 @@ password-manager exclusion; every remap rule including app exclusions and the
 - **Source attribution is a guess.** macOS doesn't record which app wrote to the
   pasteboard, so MacToys infers it from what was frontmost.
 - **Ad-hoc signing** means the Accessibility grant resets on every rebuild.
+- **OCR is offered in one language at a time** (English by default). Change
+  `ocrLanguages` in `preferences.json` to any language Vision supports.
+- **Always-on-top is deliberately absent.** macOS exposes no public API for it, and
+  the private one breaks between releases.
 
 ## License
 
