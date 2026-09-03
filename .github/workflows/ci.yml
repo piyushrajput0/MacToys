@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build -v
+
+      # The suite is a plain executable rather than XCTest, so it runs anywhere
+      # the Swift toolchain does and needs no simulator, GUI or permissions.
+      - name: Test
+        run: swift run MacToysSelfTest
+
+      - name: Bundle the app
+        run: ./Scripts/bundle.sh release
+
+      - name: Check the bundle is well formed
+        run: |
+          test -x dist/MacToys.app/Contents/MacOS/MacToys
+          plutil -lint dist/MacToys.app/Contents/Info.plist
