@@ -81,8 +81,11 @@ Settings live in the menu bar icon → **Settings…**, including a shortcut rec
 (click a binding, press the keys you want). Everything is also plain JSON at
 `~/Library/Application Support/MacToys/preferences.json` if you prefer.
 
-MacToys lives in the menu bar — there's no Dock icon and no window until you ask
-for one. The cheat sheet opens automatically the first time you run it.
+MacToys lives in the menu bar — there's no Dock icon. Opening it (a fresh
+launch, or double-clicking it again while it's already running) always shows
+the Settings window, so you can immediately see everything it does; the cheat
+sheet opens alongside it the first time you run it. Everything is also reachable
+from the menu bar icon at any time.
 
 ## Permissions — and what works without them
 

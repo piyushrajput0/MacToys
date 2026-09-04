@@ -65,6 +65,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if firstRun {
             cheatSheet.show()
         }
+        // The app has no Dock icon and no window by design (it lives in the
+        // menu bar), so launching it manually — double-clicking it in Finder,
+        // Spotlight, opening it again while it is already running — produced
+        // no visible feedback at all. That is indistinguishable from "it did
+        // not open". Showing Settings here guarantees something appears every
+        // time the user actually asks to open the app.
+        settings.update(preferences: preferences)
+        settings.show()
+    }
+
+    /// Called when the user tries to open the app again while it is already
+    /// running — e.g. double-clicking it in Finder a second time. Without this,
+    /// LaunchServices just re-activates the existing background process, which
+    /// has no window to bring forward, so nothing visibly happens.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settings.update(preferences: preferences)
+        settings.show()
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
