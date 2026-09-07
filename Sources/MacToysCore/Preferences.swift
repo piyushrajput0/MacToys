@@ -65,7 +65,7 @@ public struct Preferences: Codable, Equatable {
                 keyRemapEnabled: Bool = false,
                 textExtractorEnabled: Bool = true,
                 colorPickerEnabled: Bool = true,
-                clipboardCapacity: Int = 100,
+                clipboardCapacity: Int = 15,
                 clipboardPollInterval: Double = 0.4,
                 persistClipboardHistory: Bool = true,
                 autoPasteOnPick: Bool = true,

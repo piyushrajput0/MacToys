@@ -40,7 +40,7 @@ Everything is keyboard-first and runs from the menu bar.
 
 | Feature | Shortcut | Notes |
 |---|---|---|
-| **Clipboard history** | `⇧⌘V` | Searchable, pinnable. Text, images and files. |
+| **Clipboard history** | `⇧⌘V` | Searchable, pinnable. Text, images and files. Keeps the last 15 by default — pin anything you want to keep longer, or raise the limit in Settings (up to 1000). |
 | **Snip to clipboard** | `⇧⌘S` | Drag a region → straight onto the clipboard. |
 | **Extract text (OCR)** | `⌃⌥T` | Drag over anything on screen; the text lands on your clipboard. Runs on-device. |
 | **Colour picker** | `⌃⌥K` | Magnified loupe, copies as hex, `rgb()`, `hsl()`, SwiftUI or NSColor. |
@@ -98,9 +98,10 @@ Most of MacToys needs **nothing at all**:
 | Colour picker | Windows `Home`/`End` |
 | Keep awake, settings, cheat sheet | Finder cut/paste and `⌦` |
 
-Text extraction uses `screencapture`, so the first time you use it macOS will ask
-for **Screen Recording** — the same prompt any screenshot tool triggers. Recognition
-itself runs on-device through Apple's Vision framework; no image ever leaves your Mac.
+Snip and text extraction use `screencapture`, so the first time you use either,
+macOS will ask for **Screen Recording** — the same prompt any screenshot tool
+triggers. Recognition itself runs on-device through Apple's Vision framework; no
+image ever leaves your Mac.
 
 Accessibility is required for the second column because macOS does not let one app
 move another app's windows, or observe keystrokes, without explicit consent — which
@@ -111,9 +112,16 @@ ask for the same one) and it is granted per-app in
 If you'd rather not grant it, the first column still works and MacToys will never
 nag you — it just tells you once, at the moment you press a shortcut that needs it.
 
-> **Rebuilding resets it.** The permission is tied to the app's code signature.
-> This project signs ad-hoc, so the signature changes on every build and macOS will
-> ask again. Remove the old entry and re-tick the box after `make install`.
+> **Rebuilding resets both permissions.** Accessibility and Screen Recording are
+> both tied to the app's code signature. This project signs ad-hoc, so the
+> signature changes on every build and macOS treats each rebuild as a new app —
+> a grant given to yesterday's build does not carry over to today's, even though
+> the entry can sit there checked in Settings and look like it should still work.
+> If a feature says it needs a permission you're sure you already granted: open
+> the relevant Settings pane, remove MacToys from the list (select it, click
+> "–"), quit MacToys completely, reopen it, and allow it again when asked. Doing
+> this from `make install` matters less than doing it *after every rebuild* —
+> MacToys will tell you which permission and pane, at the point you hit it.
 
 ## Privacy
 
@@ -176,6 +184,12 @@ file that is missing any field, so adding a single preference would have wiped e
 choice the user had made. `Preferences` decodes field by field with per-field
 fallbacks, and merges new default shortcuts into existing ones rather than replacing
 them.
+
+**The delete key that wasn't.** `⌘⌫` in the clipboard picker used to do nothing.
+Cocoa text fields don't send `deleteBackward(_:)` for `⌘⌫` the way you'd expect —
+they send `deleteToBeginningOfLine(_:)`, the same selector as plain `⌘Backspace`
+in TextEdit. The handler was checking the wrong selector, so the field silently
+ran its own default edit instead of deleting the highlighted item.
 
 ## Architecture
 

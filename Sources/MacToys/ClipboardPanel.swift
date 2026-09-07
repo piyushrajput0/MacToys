@@ -285,9 +285,14 @@ final class ClipboardPanelController: NSObject, NSTableViewDataSource, NSTableVi
             commitSelection(); return true
         case #selector(NSResponder.cancelOperation(_:)):
             hide(); return true
+        case #selector(NSResponder.deleteToBeginningOfLine(_:)):
+            // This, not deleteBackward(_:), is the selector AppKit actually
+            // sends for ⌘⌫ in a text field — it's bound to "delete to start of
+            // line" by default. Checking deleteBackward for a command flag
+            // never matched, so ⌘⌫ was falling through to that default text
+            // edit instead of deleting the highlighted clipboard item.
+            deleteSelection(); return true
         case #selector(NSResponder.deleteBackward(_:)):
-            // ⌘⌫ deletes the highlighted entry; a plain backspace still edits
-            // the search text.
             if NSEvent.modifierFlags.contains(.command) { deleteSelection(); return true }
             return false
         default:

@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if preferences.snipEnabled, let spec = preferences.spec("snipToClipboard") {
-            hotKeys.register(spec, name: "Snip to Clipboard") { SnipService.capture(.region) }
+            hotKeys.register(spec, name: "Snip to Clipboard") { [weak self] in self?.snip(.region) }
         }
 
         if let spec = preferences.spec("pasteAsPlainText") {
@@ -232,7 +232,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requireAccessibility(for feature: String, reason: String) -> Bool {
         if Permissions.accessibilityGranted { return true }
         Permissions.requestAccessibility()
-        Permissions.explain(feature: feature, reason: reason, openSettings: Permissions.openAccessibilitySettings)
+        Permissions.explain(feature: feature, permission: "Accessibility", reason: reason,
+                            openSettings: Permissions.openAccessibilitySettings)
+        return false
+    }
+
+    /// Screen Recording is checked ourselves, rather than letting
+    /// `screencapture` fail silently or rely solely on the system's own prompt:
+    /// that prompt gives no way to explain the ad-hoc-signing nuance to someone
+    /// who is sure they already granted it.
+    private func requireScreenRecording() -> Bool {
+        if Permissions.screenRecordingGranted { return true }
+        Permissions.requestScreenRecording()
+        Permissions.explainScreenRecording()
         return false
     }
 
@@ -283,7 +295,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { KeyRemapper.sendPaste() }
     }
 
+    private func snip(_ mode: SnipService.Mode) {
+        guard requireScreenRecording() else { return }
+        SnipService.capture(mode)
+    }
+
     private func extractText() {
+        guard requireScreenRecording() else { return }
         TextExtractor.extract(languages: preferences.ocrLanguages,
                               joinLines: preferences.ocrJoinLines) { [weak self] result in
             guard let self = self else { return }
@@ -487,8 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu actions
 
     @objc private func showClipboard() { panel.toggle() }
-    @objc private func snipRegion() { SnipService.capture(.region) }
-    @objc private func snipWindow() { SnipService.capture(.window) }
+    @objc private func snipRegion() { snip(.region) }
+    @objc private func snipWindow() { snip(.window) }
     @objc private func nextDisplay() { moveDisplay(forward: true) }
     @objc private func showCheatSheet() { cheatSheet.show() }
     @objc private func showSettings() { settings.update(preferences: preferences); settings.show() }

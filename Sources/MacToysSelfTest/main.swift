@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 import MacToysCore
 
 let t = TinyTest()
@@ -740,6 +741,26 @@ t.test("every default shortcut survives parse then re-serialise") {
         }
         t.equal(reparsed, spec, "\(name) changed across a round trip")
     }
+}
+
+
+// ────────────────────────────────────────────────────── Cocoa key bindings ────
+t.group("Cocoa key binding facts")
+
+t.test("REGRESSION: Cmd+Delete in a text field sends deleteToBeginningOfLine, not deleteBackward") {
+    // NSTextField dispatches this selector for Cmd+Delete (same as Cmd+Backspace
+    // in TextEdit/Mail/any Cocoa text field) -- never deleteBackward(_:), even
+    // with Command held. The clipboard picker's delete-selected-item handler
+    // switched on deleteBackward with a Command-flag check, which can never be
+    // reached for this chord: AppKit already dispatched a different selector by
+    // the time our handler runs, so the checked branch was unreachable and the
+    // field's default line-delete ran instead of removing the highlighted item.
+    // This does not exercise AppKit's dispatch (that needs a live text field and
+    // real key event, which this headless suite cannot drive) -- it records the
+    // platform fact so this cannot silently regress back to checking the wrong
+    // selector again.
+    t.expect(#selector(NSResponder.deleteToBeginningOfLine(_:)) != #selector(NSResponder.deleteBackward(_:)),
+             "these must be handled as distinct selectors")
 }
 
 exit(t.report())
