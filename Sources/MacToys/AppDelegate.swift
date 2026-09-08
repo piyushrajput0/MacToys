@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loadHistory()
 
         panel = ClipboardPanelController(store: store, watcher: watcher, preferences: preferences)
+        panel.onStoreMutated = { [weak self] in self?.scheduleSave() }
         settings = SettingsWindowController(preferences: preferences)
         settings.onChange = { [weak self] updated in self?.apply(updated) }
 
@@ -355,6 +356,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 remapper.update(config: preferences.remap)
             } else if Permissions.accessibilityGranted {
                 remapper.start(config: preferences.remap)
+            } else if !previous.keyRemapEnabled {
+                // Switched on just now without the permission it needs. Saying
+                // nothing left the checkbox ticked over a feature that could
+                // not possibly work, so ask, and turn it back off if the answer
+                // is no rather than leaving the UI claiming otherwise.
+                _ = requireAccessibility(for: "Windows key behaviour",
+                                         reason: "Rewriting Home, End and Finder's cut-and-paste means watching keystrokes, which macOS gates behind this permission.")
+                if Permissions.accessibilityGranted {
+                    remapper.start(config: preferences.remap)
+                } else {
+                    preferences.keyRemapEnabled = false
+                    try? preferences.save()
+                    settings.update(preferences: preferences)
+                }
             }
         } else if remapper.isRunning {
             remapper.stop()

@@ -26,6 +26,9 @@ final class ClipboardPanelController: NSObject, NSTableViewDataSource, NSTableVi
     /// synthesised paste) can be handed back to it.
     private var previousApp: NSRunningApplication?
 
+    /// Called whenever the picker changes the history, so the owner can save.
+    var onStoreMutated: (() -> Void)?
+
     var isVisible: Bool { panel?.isVisible ?? false }
 
     init(store: ClipboardStore, watcher: ClipboardWatcher, preferences: Preferences) {
@@ -305,6 +308,17 @@ final class ClipboardPanelController: NSObject, NSTableViewDataSource, NSTableVi
     func handleKeyDown(_ event: NSEvent) -> Bool {
         guard isVisible, event.modifierFlags.contains(.command) else { return false }
 
+        // Delete is matched on key code rather than characters. The Delete key
+        // reports "\u{7F}", which none of the character comparisons below can
+        // ever match, and routing it through the field editor's command
+        // dispatch proved unreliable in practice. This monitor sees every
+        // keystroke in the app before the responder chain does, which is the
+        // same reason ⌘P and ⌘1–9 are handled here.
+        if event.keyCode == KeyCode.delete || event.keyCode == KeyCode.forwardDelete {
+            deleteSelection()
+            return true
+        }
+
         if let chars = event.charactersIgnoringModifiers {
             if let digit = Int(chars), digit >= 1, digit <= 9 {
                 guard digit - 1 < results.count else { return true }
@@ -356,12 +370,17 @@ final class ClipboardPanelController: NSObject, NSTableViewDataSource, NSTableVi
         if !results.isEmpty {
             tableView.selectRowIndexes(IndexSet(integer: min(row, results.count - 1)), byExtendingSelection: false)
         }
+        // Persist straight away. Waiting for the periodic save meant a deleted
+        // item could reappear if the app exited first, which reads as the
+        // delete never having worked.
+        onStoreMutated?()
     }
 
     private func togglePinOnSelection() {
         guard let item = selectedItem else { return }
         _ = store.togglePin(id: item.id)
         reload()
+        onStoreMutated?()
     }
 
     // MARK: - Formatting

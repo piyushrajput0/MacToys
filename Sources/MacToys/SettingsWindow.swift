@@ -24,6 +24,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var gapSlider: NSSlider!
     private var gapLabel: NSTextField!
     private var colorFormatPopup: NSPopUpButton!
+    private var keyboardStatusLabel: NSTextField!
+    private var grantAccessibilityButton: NSButton!
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -204,14 +206,69 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func keyboardPane() -> NSView {
-        pane([
+        // The master switch lives here, next to the options it governs. It used
+        // to sit alone on the General tab, so these three could be ticked on
+        // while the whole feature was switched off — they looked active and did
+        // nothing, with no way to tell why.
+        let master = checkbox("keyRemapEnabled", "Enable Windows key behaviour")
+        master.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        keyboardStatusLabel = NSTextField(wrappingLabelWithString: "")
+        keyboardStatusLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        keyboardStatusLabel.preferredMaxLayoutWidth = 440
+
+        grantAccessibilityButton = NSButton(title: "Grant Accessibility Permission…",
+                                            target: self,
+                                            action: #selector(openAccessibility))
+        grantAccessibilityButton.bezelStyle = .rounded
+        grantAccessibilityButton.controlSize = .small
+
+        return pane([
             heading("Windows key behaviour"),
+            master,
+            keyboardStatusLabel,
+            grantAccessibilityButton,
+            heading("What it changes"),
             checkbox("windowsHomeEnd", "Home and End jump to the start/end of the line"),
             checkbox("finderCutPaste", "⌘X then ⌘V moves files in Finder"),
             checkbox("finderForwardDelete", "⌦ moves the selected file to the Trash"),
             note("These rewrite keystrokes as they pass through the system, which macOS gates behind Accessibility permission. Terminals and code editors are left alone — they already handle Home and End the way you expect."),
             note("Finder's cut-and-paste never moves files itself. ⌘X becomes an ordinary copy, and the following ⌘V becomes Finder's own “Move Item Here”, so conflict handling and undo behave normally."),
         ])
+    }
+
+    @objc private func openAccessibility() {
+        Permissions.requestAccessibility()
+        Permissions.openAccessibilitySettings()
+    }
+
+    /// Keeps the Keyboard tab honest about whether the feature is actually
+    /// doing anything: switched off, blocked on permission, or genuinely live.
+    private func refreshKeyboardStatus() {
+        guard let label = keyboardStatusLabel else { return }
+
+        let enabled = checkboxes["keyRemapEnabled"]?.state == .on
+        let granted = Permissions.accessibilityGranted
+
+        // Sub-options are meaningless while the feature is off, so they are
+        // greyed out rather than left looking active.
+        for key in ["windowsHomeEnd", "finderCutPaste", "finderForwardDelete"] {
+            checkboxes[key]?.isEnabled = enabled
+        }
+
+        if !enabled {
+            label.stringValue = "Off — nothing below is active."
+            label.textColor = .secondaryLabelColor
+            grantAccessibilityButton?.isHidden = granted
+        } else if !granted {
+            label.stringValue = "Needs Accessibility permission before it can do anything."
+            label.textColor = .systemOrange
+            grantAccessibilityButton?.isHidden = false
+        } else {
+            label.stringValue = "Active."
+            label.textColor = .systemGreen
+            grantAccessibilityButton?.isHidden = true
+        }
     }
 
     private func shortcutsPane() -> NSView {
@@ -303,6 +360,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             colorFormatPopup?.selectItem(at: index)
         }
         for (key, recorder) in recorders { recorder.spec = p.spec(key) }
+        refreshKeyboardStatus()
     }
 
     @objc private func controlChanged() {
@@ -336,6 +394,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
 
         preferences = p.normalised()
+        refreshKeyboardStatus()
         capacityField?.stringValue = String(preferences.clipboardCapacity)
         gapLabel?.stringValue = "\(Int(preferences.snapGap)) px"
         commit()
