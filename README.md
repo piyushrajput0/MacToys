@@ -53,7 +53,7 @@ Everything is keyboard-first and runs from the menu bar.
 | **Windows `Home`/`End`** | `Home` `End` | Line start/end. `Ctrl` versions jump to document start/end. |
 | **Cut & paste files** | `⌘X` then `⌘V` | In Finder. Uses Finder's own move, so undo still works. |
 | **Delete a file** | `⌦` | In Finder. |
-| **Volume gesture** | 4 fingers ↑↓ | Windows 11's "Change audio and volume". Off by default — see below. |
+| **Volume gesture** | 4 fingers ↑↓ | Windows 11's "Change audio and volume". Speed is adjustable; a normal swipe covers the full range. Off by default — see below. |
 | **Keep awake** | menu | Like PowerToys Awake. |
 | **Settings** | `⌘,` from the menu | Every option, plus a click-and-press shortcut recorder. |
 
@@ -187,6 +187,14 @@ choice the user had made. `Preferences` decodes field by field with per-field
 fallbacks, and merges new default shortcuts into existing ones rather than replacing
 them.
 
+**Losing most of a swipe.** The first version rate-limited volume changes to one
+every 35 ms — but trackpad frames arrive every ~12 ms, and the limiter simply
+returned, while the recogniser had already counted those steps as delivered. They
+were gone for good, so a quick swipe moved the volume roughly a quarter of the
+distance it should have. Steps are now carried over to the next frame instead of
+dropped, and direction is locked once a gesture proves itself vertical, so a
+sideways wobble halfway through no longer stalls it.
+
 **Volume by trackpad, without permissions.** Changing the volume by synthesising
 the media keys would give the native HUD for free, but posting system events needs
 Accessibility. CoreAudio needs nothing at all, so the gesture works on a fresh
@@ -242,7 +250,7 @@ config)` — no event tap needed to test it.
 make test
 ```
 
-109 tests, 237 assertions, no permissions and no GUI required. XCTest ships with
+116 tests, 249 assertions, no permissions and no GUI required. XCTest ships with
 Xcode rather than the Command Line Tools, so the suite is a plain executable that
 exits non-zero on failure — which also makes it trivial to run in CI.
 
@@ -257,7 +265,8 @@ colour conversion including out-of-gamut clamping; OCR line rejoining; history
 resizing; loading a config file written by an older version; and the volume
 gesture, including that a sideways four-finger swipe (macOS switching Spaces)
 never changes the volume, that resting fingers do not drift it, and that holding
-still after a swipe stops rather than continuing.
+still after a swipe stops rather than continuing, and that an identical swipe
+moves the volume the same amount whether performed quickly or slowly.
 
 ## Limitations
 

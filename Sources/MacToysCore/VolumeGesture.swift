@@ -52,9 +52,14 @@ public struct VolumeGestureRecognizer {
     /// Set once a gesture is ruled horizontal, so it stays ruled out for its
     /// whole duration rather than flipping to vertical partway through.
     private var rejected = false
+    /// The mirror image: once a gesture has proved itself vertical, it stays
+    /// vertical. Re-testing the ratio on every frame meant a sideways wobble
+    /// halfway through a swipe silently stopped the volume moving, which is a
+    /// large part of why long swipes felt like they stalled.
+    private var lockedVertical = false
 
     public init(requiredFingers: Int = 4,
-                stepDistance: Double = 0.045,
+                stepDistance: Double = 0.028,
                 verticalRatio: Double = 1.6,
                 deadZone: Double = 0.012) {
         self.requiredFingers = requiredFingers
@@ -70,6 +75,7 @@ public struct VolumeGestureRecognizer {
     public mutating func reset() {
         tracking = false
         rejected = false
+        lockedVertical = false
         emittedSteps = 0
         totalHorizontal = 0
         totalVertical = 0
@@ -86,6 +92,7 @@ public struct VolumeGestureRecognizer {
         if !tracking {
             tracking = true
             rejected = false
+            lockedVertical = false
             anchorX = sample.x
             anchorY = sample.y
             lastY = sample.y
@@ -104,16 +111,19 @@ public struct VolumeGestureRecognizer {
 
         if rejected { return .none }
 
-        // Wait until there is enough movement to have a direction at all.
-        guard dy > deadZone || dx > deadZone else { return .none }
+        if !lockedVertical {
+            // Wait until there is enough movement to have a direction at all.
+            guard dy > deadZone || dx > deadZone else { return .none }
 
-        // Predominantly sideways: this is a Spaces swipe, leave it alone for
-        // the rest of the gesture.
-        if dx > dy * verticalRatio {
-            rejected = true
-            return .none
+            // Predominantly sideways: this is a Spaces swipe, leave it alone
+            // for the rest of the gesture.
+            if dx > dy * verticalRatio {
+                rejected = true
+                return .none
+            }
+            guard dy > dx * verticalRatio else { return .none }
+            lockedVertical = true
         }
-        guard dy > dx * verticalRatio else { return .none }
 
         // The trackpad's y grows upward, which matches "swipe up = louder".
         let travelled = sample.y - anchorY

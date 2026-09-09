@@ -74,7 +74,7 @@ public struct Preferences: Codable, Equatable {
                 colorPickerEnabled: Bool = true,
                 volumeGestureEnabled: Bool = false,
                 volumeGestureFingers: Int = 4,
-                volumeGestureSensitivity: Double = 0.045,
+                volumeGestureSensitivity: Double = 0.028,
                 clipboardCapacity: Int = 15,
                 clipboardPollInterval: Double = 0.4,
                 persistClipboardHistory: Bool = true,

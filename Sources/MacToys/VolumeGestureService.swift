@@ -8,13 +8,17 @@ final class VolumeGestureService {
 
     private let reader = MultitouchReader()
     private var recognizer = VolumeGestureRecognizer()
-    private var lastStepTime: TimeInterval = 0
+    /// Steps the recogniser has produced but that have not been applied yet.
+    /// Nothing is ever discarded — see `handle`.
+    private var pendingSteps = 0
 
     private(set) var isRunning = false
     var lastFailure: String? { reader.lastFailure }
 
-    /// Rate limit, so a fast swipe cannot slam the volume from 0 to 100.
-    private let minimumStepInterval: TimeInterval = 0.035
+    /// Most steps one frame may apply. Anything above this is carried over to
+    /// the next frame rather than dropped, so the volume still travels the full
+    /// distance the swipe asked for — just spread over a frame or two.
+    private let maximumStepsPerFrame = 4
 
     @discardableResult
     func start(fingers: Int, sensitivity: Double) -> Bool {
@@ -32,6 +36,7 @@ final class VolumeGestureService {
         reader.onFrame = nil
         reader.stop()
         recognizer.reset()
+        pendingSteps = 0
         isRunning = false
     }
 
@@ -45,14 +50,22 @@ final class VolumeGestureService {
         let now = ProcessInfo.processInfo.systemUptime
         let outcome = recognizer.feed(GestureSample(fingerCount: fingers, x: x, y: y, time: now))
 
-        guard case .steps(let steps) = outcome, steps != 0 else { return }
-        guard now - lastStepTime >= minimumStepInterval else { return }
-        lastStepTime = now
+        if case .steps(let steps) = outcome { pendingSteps += steps }
+        guard pendingSteps != 0 else { return }
 
-        // Clamp per frame: a single frame should never move more than a couple
-        // of notches, however fast the swipe.
-        let bounded = max(-2, min(2, steps))
-        guard let level = AudioController.adjust(steps: bounded) else { return }
+        // Frames arrive about every 12 ms. An earlier version refused to act
+        // when they came in faster than a fixed interval and simply returned —
+        // but the recogniser had already counted those steps as delivered, so
+        // they were lost for good and a quick swipe moved the volume a fraction
+        // of the distance it should have. Whatever cannot be applied now is
+        // kept for the next frame instead.
+        let applied = max(-maximumStepsPerFrame, min(maximumStepsPerFrame, pendingSteps))
+        pendingSteps -= applied
+
+        guard let level = AudioController.adjust(steps: applied) else {
+            pendingSteps = 0   // no adjustable output; do not queue up forever
+            return
+        }
         VolumeHUD.show(level: level, muted: AudioController.isMuted)
     }
 }

@@ -25,6 +25,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var gapLabel: NSTextField!
     private var colorFormatPopup: NSPopUpButton!
     private var fingersPopup: NSPopUpButton!
+    private var volumeSpeedSlider: NSSlider!
+    private var volumeSpeedLabel: NSTextField!
     private var keyboardStatusLabel: NSTextField!
     private var grantAccessibilityButton: NSButton!
 
@@ -217,10 +219,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let master = checkbox("volumeGestureEnabled", "Swipe up and down to change the volume")
         master.font = .systemFont(ofSize: 13, weight: .semibold)
 
+        // Presented as speed, not as the underlying distance-per-step: the
+        // slider moves right for "less swiping per notch", so higher is faster.
+        volumeSpeedSlider = NSSlider(value: 0, minValue: 0, maxValue: 1,
+                                     target: self, action: #selector(controlChanged))
+        volumeSpeedSlider.translatesAutoresizingMaskIntoConstraints = false
+        volumeSpeedSlider.widthAnchor.constraint(equalToConstant: 180).isActive = true
+
+        volumeSpeedLabel = NSTextField(labelWithString: "")
+        volumeSpeedLabel.font = .systemFont(ofSize: 11)
+        volumeSpeedLabel.textColor = .secondaryLabelColor
+
+        let speedRow = NSStackView(views: [volumeSpeedSlider, volumeSpeedLabel])
+        speedRow.orientation = .horizontal
+        speedRow.spacing = 8
+
         return pane([
             heading("Volume gesture"),
             master,
             row("Fingers", fingersPopup, width: 110),
+            row("Speed", speedRow, width: 110),
+            note("Speed is how far you must swipe for each volume notch. Turn it up if a swipe does not cover enough of the range."),
             note("Windows 11 offers this under Touchpad › Four-finger gestures › “Change audio and volume”. macOS has no equivalent."),
             heading("Before it will work"),
             note("macOS already uses four-finger swipes for Mission Control and App Exposé. MacToys can watch the trackpad, but it cannot take those gestures away from the system — so with four fingers selected, swiping will change the volume *and* trigger Mission Control at the same time.\n\nOpen System Settings › Trackpad › More Gestures and set Mission Control and App Exposé to three fingers or Off, or choose three fingers above instead."),
@@ -258,6 +277,28 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             note("These rewrite keystrokes as they pass through the system, which macOS gates behind Accessibility permission. Terminals and code editors are left alone — they already handle Home and End the way you expect."),
             note("Finder's cut-and-paste never moves files itself. ⌘X becomes an ordinary copy, and the following ⌘V becomes Finder's own “Move Item Here”, so conflict handling and undo behave normally."),
         ])
+    }
+
+    /// Slider position 0...1 to trackpad distance per volume notch. Inverted,
+    /// because a shorter distance means a faster gesture.
+    static func stepDistance(fromSpeed speed: Double) -> Double {
+        let slowest = 0.070, fastest = 0.012
+        let t = min(max(speed, 0), 1)
+        return slowest + (fastest - slowest) * t
+    }
+
+    static func speed(fromStepDistance distance: Double) -> Double {
+        let slowest = 0.070, fastest = 0.012
+        return min(max((distance - slowest) / (fastest - slowest), 0), 1)
+    }
+
+    /// How much of the volume range a comfortable swipe covers, so the number
+    /// means something. macOS moves the volume in sixteenths.
+    static func speedDescription(_ stepDistance: Double) -> String {
+        let comfortableSwipe = 0.55
+        let notches = comfortableSwipe / max(stepDistance, 0.001)
+        let percent = Int((min(notches / 16.0, 1.0) * 100).rounded())
+        return "\(percent)% of the range per swipe"
     }
 
     @objc private func openAccessibility() {
@@ -383,6 +424,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             colorFormatPopup?.selectItem(at: index)
         }
         fingersPopup?.selectItem(at: p.volumeGestureFingers == 3 ? 0 : 1)
+        volumeSpeedSlider?.doubleValue = SettingsWindowController.speed(fromStepDistance: p.volumeGestureSensitivity)
+        volumeSpeedLabel?.stringValue = SettingsWindowController.speedDescription(p.volumeGestureSensitivity)
         for (key, recorder) in recorders { recorder.spec = p.spec(key) }
         refreshKeyboardStatus()
     }
@@ -406,6 +449,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         p.ocrJoinLines            = on("ocrJoinLines")
         p.volumeGestureEnabled    = on("volumeGestureEnabled")
         if let popup = fingersPopup { p.volumeGestureFingers = popup.indexOfSelectedItem == 0 ? 3 : 4 }
+        if let slider = volumeSpeedSlider {
+            p.volumeGestureSensitivity = SettingsWindowController.stepDistance(fromSpeed: slider.doubleValue)
+        }
         p.remap.windowsHomeEnd      = on("windowsHomeEnd")
         p.remap.finderCutPaste      = on("finderCutPaste")
         p.remap.finderForwardDelete = on("finderForwardDelete")
@@ -422,6 +468,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         preferences = p.normalised()
         refreshKeyboardStatus()
         capacityField?.stringValue = String(preferences.clipboardCapacity)
+        volumeSpeedLabel?.stringValue = SettingsWindowController.speedDescription(preferences.volumeGestureSensitivity)
         gapLabel?.stringValue = "\(Int(preferences.snapGap)) px"
         commit()
     }

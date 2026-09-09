@@ -5,6 +5,21 @@ import MacToysCore
 
 let t = TinyTest()
 
+/// Mirrors SettingsWindowController's speed mapping, which lives in the app
+/// target and so cannot be imported here.
+enum SettingsSpeed {
+    static func stepDistance(fromSpeed speed: Double) -> Double {
+        let slowest = 0.070, fastest = 0.012
+        let t = min(max(speed, 0), 1)
+        return slowest + (fastest - slowest) * t
+    }
+    static func speed(fromStepDistance distance: Double) -> Double {
+        let slowest = 0.070, fastest = 0.012
+        return min(max((distance - slowest) / (fastest - slowest), 0), 1)
+    }
+}
+
+
 /// Mirrors `SettingsWindowController.serialise`, which lives in the app target
 /// and so cannot be imported here.
 func serialiseSpec(_ spec: HotKeySpec) -> String {
@@ -904,6 +919,82 @@ t.test("the gesture is off by default") {
     // It collides with Mission Control until the user frees that gesture up,
     // so it must never switch itself on behind their back.
     t.expect(!Preferences().volumeGestureEnabled)
+}
+
+
+// ──────────────────────────────────────────── Volume gesture throughput ────
+t.group("Volume gesture reach")
+
+/// Total steps a swipe produces, sampled at the trackpad's real ~79 Hz.
+func stepsFor(distance: Double, seconds: Double, stepDistance: Double = 0.028) -> Int {
+    var r = VolumeGestureRecognizer(stepDistance: stepDistance)
+    let frames = max(2, Int(seconds * 79))
+    var total = 0
+    for i in 0...frames {
+        let f = Double(i) / Double(frames)
+        let y = 0.2 + distance * f
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: y, time: Double(i) / 79.0)) {
+            total += n
+        }
+    }
+    return total
+}
+
+t.test("REGRESSION: a fast swipe delivers as many steps as a slow one") {
+    // The bug: frames arrive every ~12ms, but the service refused to act more
+    // often than every 35ms and simply dropped the steps in between. The
+    // recogniser had already counted them as delivered, so they were gone --
+    // a quick swipe moved the volume about a quarter of the intended distance.
+    let slow = stepsFor(distance: 0.55, seconds: 1.2)
+    let fast = stepsFor(distance: 0.55, seconds: 0.15)
+    t.equal(fast, slow, "the same swipe must move the volume the same amount at any speed")
+}
+
+t.test("a comfortable swipe covers the whole volume range") {
+    // macOS moves the volume in sixteenths, so 16 steps is 0 to 100%.
+    let steps = stepsFor(distance: 0.55, seconds: 0.4)
+    t.expect(steps >= 16, "expected at least 16 notches from a normal swipe, got \(steps)")
+}
+
+t.test("a short nudge still makes a small change") {
+    let steps = stepsFor(distance: 0.08, seconds: 0.2)
+    t.expect(steps >= 2 && steps <= 6, "expected a few notches, got \(steps)")
+}
+
+t.test("a sideways wobble mid-swipe does not stall the volume") {
+    // Direction is locked once proven vertical. Re-testing every frame meant a
+    // wobble could silently stop the gesture partway through.
+    var r = VolumeGestureRecognizer()
+    var total = 0
+    func feed(_ x: Double, _ y: Double, _ i: Int) {
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: 4, x: x, y: y, time: Double(i) / 79.0)) { total += n }
+    }
+    feed(0.5, 0.20, 0)
+    for i in 1...20 { feed(0.5, 0.20 + Double(i) * 0.015, i) }        // clearly vertical
+    for i in 21...40 { feed(0.5 + Double(i - 20) * 0.012, 0.50 + Double(i - 20) * 0.012, i) }  // drifts sideways
+    t.expect(total >= 16, "a swipe that drifts should keep working, got \(total)")
+}
+
+t.test("speed setting maps to distance and back") {
+    for speed in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let d = SettingsSpeed.stepDistance(fromSpeed: speed)
+        t.nearlyEqual(SettingsSpeed.speed(fromStepDistance: d), speed, tolerance: 0.001, "round trip at \(speed)")
+    }
+}
+
+t.test("turning the speed up needs less swiping per notch") {
+    let slow = SettingsSpeed.stepDistance(fromSpeed: 0.0)
+    let fast = SettingsSpeed.stepDistance(fromSpeed: 1.0)
+    t.expect(fast < slow, "higher speed must mean a shorter distance per notch")
+    t.expect(stepsFor(distance: 0.55, seconds: 0.4, stepDistance: fast)
+             > stepsFor(distance: 0.55, seconds: 0.4, stepDistance: slow),
+             "the fast end must move the volume further for the same swipe")
+}
+
+t.test("even the slowest setting reaches a usable amount of the range") {
+    let slowest = SettingsSpeed.stepDistance(fromSpeed: 0.0)
+    let steps = stepsFor(distance: 0.55, seconds: 0.4, stepDistance: slowest)
+    t.expect(steps >= 6, "the slow end should still be usable, got \(steps)")
 }
 
 exit(t.report())
