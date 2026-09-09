@@ -763,4 +763,147 @@ t.test("REGRESSION: Cmd+Delete in a text field sends deleteToBeginningOfLine, no
              "these must be handled as distinct selectors")
 }
 
+
+// ─────────────────────────────────────────────── VolumeGestureRecognizer ────
+t.group("Volume gesture")
+
+/// Feeds a straight swipe and returns the total steps emitted.
+func swipe(_ r: inout VolumeGestureRecognizer, fingers: Int,
+           from: (Double, Double), to: (Double, Double), frames: Int = 20) -> Int {
+    var total = 0
+    for i in 0...frames {
+        let f = Double(i) / Double(frames)
+        let x = from.0 + (to.0 - from.0) * f
+        let y = from.1 + (to.1 - from.1) * f
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: fingers, x: x, y: y, time: Double(i) * 0.008)) {
+            total += n
+        }
+    }
+    return total
+}
+
+t.test("swiping up with four fingers raises the volume") {
+    var r = VolumeGestureRecognizer()
+    let steps = swipe(&r, fingers: 4, from: (0.5, 0.3), to: (0.5, 0.8))
+    t.expect(steps > 0, "expected positive steps, got \(steps)")
+}
+
+t.test("swiping down lowers it by a comparable amount") {
+    var up = VolumeGestureRecognizer()
+    var down = VolumeGestureRecognizer()
+    let a = swipe(&up, fingers: 4, from: (0.5, 0.3), to: (0.5, 0.8))
+    let b = swipe(&down, fingers: 4, from: (0.5, 0.8), to: (0.5, 0.3))
+    t.equal(b, -a, "down should mirror up")
+}
+
+t.test("a sideways swipe never touches the volume") {
+    // Four fingers left/right is macOS switching Spaces. Changing the volume
+    // every time someone moves between desktops would be unusable.
+    var r = VolumeGestureRecognizer()
+    t.equal(swipe(&r, fingers: 4, from: (0.1, 0.5), to: (0.9, 0.5)), 0)
+}
+
+t.test("a mostly-sideways diagonal is still treated as sideways") {
+    var r = VolumeGestureRecognizer()
+    t.equal(swipe(&r, fingers: 4, from: (0.1, 0.45), to: (0.9, 0.55)), 0)
+}
+
+t.test("once ruled sideways it stays ruled out for the whole gesture") {
+    // Otherwise a Spaces swipe that drifts upward at the end would fire.
+    var r = VolumeGestureRecognizer()
+    var total = 0
+    func feed(_ x: Double, _ y: Double, _ i: Int) {
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: 4, x: x, y: y, time: Double(i) * 0.008)) { total += n }
+    }
+    feed(0.1, 0.5, 0)
+    for i in 1...10 { feed(0.1 + Double(i) * 0.06, 0.5, i) }   // clearly horizontal
+    for i in 11...25 { feed(0.7, 0.5 + Double(i - 10) * 0.03, i) }  // then upward
+    t.equal(total, 0, "a sideways gesture must not start controlling volume midway")
+}
+
+t.test("the wrong number of fingers does nothing") {
+    var r = VolumeGestureRecognizer(requiredFingers: 4)
+    t.equal(swipe(&r, fingers: 2, from: (0.5, 0.2), to: (0.5, 0.9)), 0, "two fingers is scrolling")
+    t.equal(swipe(&r, fingers: 3, from: (0.5, 0.2), to: (0.5, 0.9)), 0, "three is not four")
+}
+
+t.test("three-finger mode responds to three, not four") {
+    var r = VolumeGestureRecognizer(requiredFingers: 3)
+    t.expect(swipe(&r, fingers: 3, from: (0.5, 0.3), to: (0.5, 0.8)) > 0)
+    var r2 = VolumeGestureRecognizer(requiredFingers: 3)
+    t.equal(swipe(&r2, fingers: 4, from: (0.5, 0.3), to: (0.5, 0.8)), 0)
+}
+
+t.test("lifting a finger mid-swipe stops the gesture") {
+    var r = VolumeGestureRecognizer()
+    _ = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: 0.3, time: 0))
+    _ = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: 0.5, time: 0.01))
+    _ = r.feed(GestureSample(fingerCount: 3, x: 0.5, y: 0.6, time: 0.02))
+    t.expect(!r.isTracking, "dropping to three fingers must end the gesture")
+}
+
+t.test("resting fingers do not drift the volume") {
+    var r = VolumeGestureRecognizer()
+    var total = 0
+    // Tiny jitter, as from a hand resting on the trackpad.
+    for i in 0...60 {
+        let y = 0.5 + (i % 2 == 0 ? 0.0015 : -0.0015)
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: y, time: Double(i) * 0.008)) { total += n }
+    }
+    t.equal(total, 0, "jitter must stay inside the dead zone")
+}
+
+t.test("steps scale with distance travelled") {
+    var short = VolumeGestureRecognizer()
+    var long = VolumeGestureRecognizer()
+    let a = swipe(&short, fingers: 4, from: (0.5, 0.45), to: (0.5, 0.60))
+    let b = swipe(&long, fingers: 4, from: (0.5, 0.20), to: (0.5, 0.90))
+    t.expect(b > a, "a longer swipe should move the volume further (\(a) vs \(b))")
+}
+
+t.test("sensitivity changes how far you must swipe per step") {
+    var coarse = VolumeGestureRecognizer(stepDistance: 0.10)
+    var fine = VolumeGestureRecognizer(stepDistance: 0.02)
+    let a = swipe(&coarse, fingers: 4, from: (0.5, 0.2), to: (0.5, 0.9))
+    let b = swipe(&fine, fingers: 4, from: (0.5, 0.2), to: (0.5, 0.9))
+    t.expect(b > a, "a smaller step distance should emit more steps (\(a) vs \(b))")
+}
+
+t.test("a step is never emitted twice for the same distance") {
+    // Holding still after swiping must not keep raising the volume.
+    var r = VolumeGestureRecognizer()
+    _ = swipe(&r, fingers: 4, from: (0.5, 0.3), to: (0.5, 0.7))
+    var extra = 0
+    for i in 0...30 {
+        if case .steps(let n) = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: 0.7, time: 1 + Double(i) * 0.008)) { extra += n }
+    }
+    t.equal(extra, 0, "holding still must not keep changing the volume")
+}
+
+t.test("reset clears tracking") {
+    var r = VolumeGestureRecognizer()
+    _ = r.feed(GestureSample(fingerCount: 4, x: 0.5, y: 0.5, time: 0))
+    t.expect(r.isTracking)
+    r.reset()
+    t.expect(!r.isTracking)
+}
+
+t.test("finger count and sensitivity are clamped to something usable") {
+    var p = Preferences()
+    p.volumeGestureFingers = 9
+    p.volumeGestureSensitivity = 0.0001
+    let n = p.normalised()
+    t.equal(n.volumeGestureFingers, 4, "nine fingers is not a gesture")
+    t.equal(n.volumeGestureSensitivity, 0.01, "a near-zero step would be uncontrollable")
+    var q = Preferences()
+    q.volumeGestureFingers = 1
+    t.equal(q.normalised().volumeGestureFingers, 3)
+}
+
+t.test("the gesture is off by default") {
+    // It collides with Mission Control until the user frees that gesture up,
+    // so it must never switch itself on behind their back.
+    t.expect(!Preferences().volumeGestureEnabled)
+}
+
 exit(t.report())

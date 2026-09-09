@@ -24,6 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var gapSlider: NSSlider!
     private var gapLabel: NSTextField!
     private var colorFormatPopup: NSPopUpButton!
+    private var fingersPopup: NSPopUpButton!
     private var keyboardStatusLabel: NSTextField!
     private var grantAccessibilityButton: NSButton!
 
@@ -61,6 +62,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         tabs.addTabViewItem(tab("General", generalPane()))
         tabs.addTabViewItem(tab("Clipboard", clipboardPane()))
         tabs.addTabViewItem(tab("Windows", windowsPane()))
+        tabs.addTabViewItem(tab("Trackpad", trackpadPane()))
         tabs.addTabViewItem(tab("Keyboard", keyboardPane()))
         tabs.addTabViewItem(tab("Shortcuts", shortcutsPane()))
 
@@ -202,6 +204,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             row("Copy colours as", colorFormatPopup),
             heading("Text extractor"),
             checkbox("ocrJoinLines", "Join wrapped lines into paragraphs"),
+        ])
+    }
+
+    private func trackpadPane() -> NSView {
+        fingersPopup = NSPopUpButton()
+        fingersPopup.target = self
+        fingersPopup.action = #selector(controlChanged)
+        fingersPopup.addItem(withTitle: "Three fingers")
+        fingersPopup.addItem(withTitle: "Four fingers (matches Windows)")
+
+        let master = checkbox("volumeGestureEnabled", "Swipe up and down to change the volume")
+        master.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        return pane([
+            heading("Volume gesture"),
+            master,
+            row("Fingers", fingersPopup, width: 110),
+            note("Windows 11 offers this under Touchpad › Four-finger gestures › “Change audio and volume”. macOS has no equivalent."),
+            heading("Before it will work"),
+            note("macOS already uses four-finger swipes for Mission Control and App Exposé. MacToys can watch the trackpad, but it cannot take those gestures away from the system — so with four fingers selected, swiping will change the volume *and* trigger Mission Control at the same time.\n\nOpen System Settings › Trackpad › More Gestures and set Mission Control and App Exposé to three fingers or Off, or choose three fingers above instead."),
+            note("Volume is changed through CoreAudio, so this needs no permission at all. Reading the trackpad uses a private Apple framework — the same one BetterTouchTool relies on — so a future macOS could remove it. If that happens MacToys switches this off and tells you, rather than failing quietly."),
         ])
     }
 
@@ -359,6 +382,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         if let index = ColorFormat.allCases.firstIndex(of: p.colorFormat) {
             colorFormatPopup?.selectItem(at: index)
         }
+        fingersPopup?.selectItem(at: p.volumeGestureFingers == 3 ? 0 : 1)
         for (key, recorder) in recorders { recorder.spec = p.spec(key) }
         refreshKeyboardStatus()
     }
@@ -380,6 +404,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         p.autoPasteOnPick         = on("autoPasteOnPick")
         p.snapCyclingEnabled      = on("snapCyclingEnabled")
         p.ocrJoinLines            = on("ocrJoinLines")
+        p.volumeGestureEnabled    = on("volumeGestureEnabled")
+        if let popup = fingersPopup { p.volumeGestureFingers = popup.indexOfSelectedItem == 0 ? 3 : 4 }
         p.remap.windowsHomeEnd      = on("windowsHomeEnd")
         p.remap.finderCutPaste      = on("finderCutPaste")
         p.remap.finderForwardDelete = on("finderForwardDelete")

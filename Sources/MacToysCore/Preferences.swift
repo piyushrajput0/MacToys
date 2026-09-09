@@ -12,6 +12,13 @@ public struct Preferences: Codable, Equatable {
     public var keyRemapEnabled: Bool
     public var textExtractorEnabled: Bool
     public var colorPickerEnabled: Bool
+    /// Four fingers up/down on the trackpad to change volume. Off by default:
+    /// macOS assigns four-finger swipes to Mission Control, so this needs the
+    /// user to free that gesture up first.
+    public var volumeGestureEnabled: Bool
+    public var volumeGestureFingers: Int
+    /// Normalised trackpad distance between volume steps; smaller is twitchier.
+    public var volumeGestureSensitivity: Double
 
     // Clipboard
     public var clipboardCapacity: Int
@@ -65,6 +72,9 @@ public struct Preferences: Codable, Equatable {
                 keyRemapEnabled: Bool = false,
                 textExtractorEnabled: Bool = true,
                 colorPickerEnabled: Bool = true,
+                volumeGestureEnabled: Bool = false,
+                volumeGestureFingers: Int = 4,
+                volumeGestureSensitivity: Double = 0.045,
                 clipboardCapacity: Int = 15,
                 clipboardPollInterval: Double = 0.4,
                 persistClipboardHistory: Bool = true,
@@ -84,6 +94,9 @@ public struct Preferences: Codable, Equatable {
         self.keyRemapEnabled = keyRemapEnabled
         self.textExtractorEnabled = textExtractorEnabled
         self.colorPickerEnabled = colorPickerEnabled
+        self.volumeGestureEnabled = volumeGestureEnabled
+        self.volumeGestureFingers = volumeGestureFingers
+        self.volumeGestureSensitivity = volumeGestureSensitivity
         self.clipboardCapacity = clipboardCapacity
         self.clipboardPollInterval = clipboardPollInterval
         self.persistClipboardHistory = persistClipboardHistory
@@ -116,6 +129,9 @@ public struct Preferences: Codable, Equatable {
         keyRemapEnabled         = v(.keyRemapEnabled, d.keyRemapEnabled)
         textExtractorEnabled    = v(.textExtractorEnabled, d.textExtractorEnabled)
         colorPickerEnabled      = v(.colorPickerEnabled, d.colorPickerEnabled)
+        volumeGestureEnabled    = v(.volumeGestureEnabled, d.volumeGestureEnabled)
+        volumeGestureFingers    = v(.volumeGestureFingers, d.volumeGestureFingers)
+        volumeGestureSensitivity = v(.volumeGestureSensitivity, d.volumeGestureSensitivity)
         clipboardCapacity       = v(.clipboardCapacity, d.clipboardCapacity)
         clipboardPollInterval   = v(.clipboardPollInterval, d.clipboardPollInterval)
         persistClipboardHistory = v(.persistClipboardHistory, d.persistClipboardHistory)
@@ -150,6 +166,10 @@ public struct Preferences: Codable, Equatable {
         p.clipboardPollInterval = min(max(p.clipboardPollInterval, 0.1), 5.0)
         p.snapGap = min(max(p.snapGap, 0), 100)
         if p.ocrLanguages.isEmpty { p.ocrLanguages = ["en-US"] }
+        // Three or four fingers only: two is scrolling, five is not reliably
+        // distinguishable from a palm.
+        p.volumeGestureFingers = min(max(p.volumeGestureFingers, 3), 4)
+        p.volumeGestureSensitivity = min(max(p.volumeGestureSensitivity, 0.01), 0.2)
         return p
     }
 

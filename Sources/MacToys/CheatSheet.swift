@@ -21,6 +21,7 @@ final class CheatSheetWindow {
         Row(windowsKey: "Win + Shift + T",   what: "Grab text off the screen (OCR)",  macKey: "⌃⌥T"),
         Row(windowsKey: "Win + Shift + C",   what: "Pick a colour, copy as hex",      macKey: "⌃⌥K"),
         Row(windowsKey: "Ctrl + Shift + V",  what: "Paste without formatting",        macKey: "⇧⌥⌘V"),
+        Row(windowsKey: "4 fingers ↑ / ↓",   what: "Volume up / down on the trackpad", macKey: "4 fingers ↑ / ↓"),
         Row(windowsKey: "Win + ←",           what: "Snap window left (press again for ⅓, ⅔)", macKey: "⌃⌥←"),
         Row(windowsKey: "Win + →",           what: "Snap window right",              macKey: "⌃⌥→"),
         Row(windowsKey: "Win + ↑",           what: "Maximize window (not full screen)", macKey: "⌃⌥↑"),

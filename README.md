@@ -6,7 +6,7 @@
 
 **The Windows features macOS never shipped — for people who just switched.**
 
-Clipboard history · Screenshot to clipboard · Screen OCR · Colour picker · Aero-Snap tiling · Windows keyboard behaviour
+Clipboard history · Screenshot to clipboard · Screen OCR · Colour picker · Aero-Snap tiling · Trackpad volume gesture · Windows keyboard behaviour
 
 A single menu-bar app. No dependencies. No account. Nothing leaves your Mac.
 
@@ -29,6 +29,7 @@ stop working. Not big things — small ones, many times a day:
 | `Delete` on a file | Deletes it | Nothing. It's `⌘⌫` |
 | `Ctrl`+`Shift`+`V` | Paste without formatting | Only some apps, under different shortcuts |
 | PowerToys `Win`+`Shift`+`T` | Grab text off the screen with OCR | Live Text works in Photos and Preview only |
+| Four fingers up/down | Change the volume | No equivalent — the gesture is Mission Control instead |
 
 None of these are missing because they're hard. They're missing because Apple made
 different choices, and there's no built-in way to choose otherwise. MacToys puts
@@ -52,6 +53,7 @@ Everything is keyboard-first and runs from the menu bar.
 | **Windows `Home`/`End`** | `Home` `End` | Line start/end. `Ctrl` versions jump to document start/end. |
 | **Cut & paste files** | `⌘X` then `⌘V` | In Finder. Uses Finder's own move, so undo still works. |
 | **Delete a file** | `⌦` | In Finder. |
+| **Volume gesture** | 4 fingers ↑↓ | Windows 11's "Change audio and volume". Off by default — see below. |
 | **Keep awake** | menu | Like PowerToys Awake. |
 | **Settings** | `⌘,` from the menu | Every option, plus a click-and-press shortcut recorder. |
 
@@ -95,7 +97,7 @@ Most of MacToys needs **nothing at all**:
 |---|---|
 | Clipboard history | Window snapping |
 | Snip to clipboard | Move window to next display |
-| Colour picker | Windows `Home`/`End` |
+| Colour picker, volume gesture | Windows `Home`/`End` |
 | Keep awake, settings, cheat sheet | Finder cut/paste and `⌦` |
 
 Snip and text extraction use `screencapture`, so the first time you use either,
@@ -185,6 +187,26 @@ choice the user had made. `Preferences` decodes field by field with per-field
 fallbacks, and merges new default shortcuts into existing ones rather than replacing
 them.
 
+**Volume by trackpad, without permissions.** Changing the volume by synthesising
+the media keys would give the native HUD for free, but posting system events needs
+Accessibility. CoreAudio needs nothing at all, so the gesture works on a fresh
+install and MacToys draws its own HUD instead.
+
+**Reading the trackpad is the unsupported part.** There is no public API: `NSEvent`
+gestures only arrive for the focused window, and macOS consumes four-finger swipes
+before any app sees them. `MultitouchSupport` — the private framework
+BetterTouchTool and Jitouch use — is the only route, so it is treated as untrusted.
+It is `dlopen`ed rather than linked, so a macOS that drops it disables one feature
+instead of breaking the app; only the finger count (a plain callback argument) and
+the first touch's position (a fixed offset) are read, so nothing depends on
+`sizeof(MTTouch)`; and coordinates are range-checked, with the feature switching
+itself off if they stop looking like the documented 0...1 values.
+
+**What it cannot do.** Reading the trackpad is passive — MacToys cannot take a
+gesture away from macOS. With four fingers selected, a swipe changes the volume
+*and* opens Mission Control. Freeing that up in System Settings › Trackpad › More
+Gestures is a manual step, which is why the feature ships switched off.
+
 **The delete key that wasn't.** `⌘⌫` in the clipboard picker used to do nothing.
 Cocoa text fields don't send `deleteBackward(_:)` for `⌘⌫` the way you'd expect —
 they send `deleteToBeginningOfLine(_:)`, the same selector as plain `⌘Backspace`
@@ -202,6 +224,7 @@ Sources/
     PasteboardGate.swift  Which clipboard changes are ours vs. a real copy
     RemapRules.swift      The whole key-remapping policy as one pure function
     ColorFormatting.swift Colour conversion and output formats
+    VolumeGesture.swift   Trackpad swipe -> volume steps, with direction locking
     OCRTextAssembler.swift Rejoining recognised lines into readable text
     Preferences.swift     Config, validation, upgrades, atomic persistence
   MacToys/            The app. AppKit, Carbon, Accessibility, CGEventTap.
@@ -219,7 +242,7 @@ config)` — no event tap needed to test it.
 make test
 ```
 
-93 tests, 216 assertions, no permissions and no GUI required. XCTest ships with
+109 tests, 237 assertions, no permissions and no GUI required. XCTest ships with
 Xcode rather than the Command Line Tools, so the suite is a plain executable that
 exits non-zero on failure — which also makes it trivial to run in CI.
 
@@ -231,7 +254,10 @@ password-manager exclusion; every remap rule including app exclusions and the
 `fn` modifier laptops add to `Home`/`End`; config clamping and fallback; the
 pasteboard-ownership state machine including the swallowed-copy regression;
 colour conversion including out-of-gamut clamping; OCR line rejoining; history
-resizing; and loading a config file written by an older version.
+resizing; loading a config file written by an older version; and the volume
+gesture, including that a sideways four-finger swipe (macOS switching Spaces)
+never changes the volume, that resting fingers do not drift it, and that holding
+still after a swipe stops rather than continuing.
 
 ## Limitations
 
@@ -249,6 +275,10 @@ resizing; and loading a config file written by an older version.
   `ocrLanguages` in `preferences.json` to any language Vision supports.
 - **Always-on-top is deliberately absent.** macOS exposes no public API for it, and
   the private one breaks between releases.
+- **The volume gesture cannot suppress Mission Control.** See above; either free
+  the four-finger swipe in System Settings or use three fingers.
+- **Some outputs have no software volume.** Certain HDMI and external DACs expose
+  no adjustable level; the gesture does nothing there, as does the volume key.
 
 ## License
 

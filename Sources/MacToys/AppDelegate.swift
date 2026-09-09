@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotKeys = HotKeyManager()
     private let remapper = KeyRemapper()
     private let awake = AwakeService()
+    private let volumeGesture = VolumeGestureService()
     private let cheatSheet = CheatSheetWindow()
     private var settings: SettingsWindowController!
 
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startClipboard()
         registerHotKeys()
         startRemapperIfEnabled()
+        startVolumeGestureIfEnabled()
         buildStatusItem()
         installLocalKeyMonitor()
 
@@ -91,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? preferences.save()
         hotKeys.unregisterAll()
         remapper.stop()
+        volumeGesture.stop()
         awake.deactivate()
         if let monitor = localKeyMonitor { NSEvent.removeMonitor(monitor) }
     }
@@ -375,6 +378,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             remapper.stop()
         }
 
+        if preferences.volumeGestureEnabled {
+            if volumeGesture.isRunning {
+                volumeGesture.update(fingers: preferences.volumeGestureFingers,
+                                     sensitivity: preferences.volumeGestureSensitivity)
+            } else if !volumeGesture.start(fingers: preferences.volumeGestureFingers,
+                                           sensitivity: preferences.volumeGestureSensitivity) {
+                // The private framework this relies on can disappear in a
+                // future macOS; say so rather than leaving a dead checkbox.
+                preferences.volumeGestureEnabled = false
+                try? preferences.save()
+                settings.update(preferences: preferences)
+                Toast.show(volumeGesture.lastFailure ?? "Volume gesture is unavailable", duration: 4)
+            }
+        } else if volumeGesture.isRunning {
+            volumeGesture.stop()
+        }
+
         if previous.launchAtLogin != preferences.launchAtLogin {
             applyLaunchAtLogin()
         }
@@ -404,6 +424,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Key remapping
+
+    private func startVolumeGestureIfEnabled() {
+        guard preferences.volumeGestureEnabled else { return }
+        if !volumeGesture.start(fingers: preferences.volumeGestureFingers,
+                                sensitivity: preferences.volumeGestureSensitivity) {
+            NSLog("[MacToys] volume gesture unavailable: \(volumeGesture.lastFailure ?? "unknown")")
+        }
+    }
 
     private func startRemapperIfEnabled() {
         guard preferences.keyRemapEnabled else { return }
