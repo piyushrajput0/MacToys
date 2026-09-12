@@ -245,11 +245,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `screencapture` fail silently or rely solely on the system's own prompt:
     /// that prompt gives no way to explain the ad-hoc-signing nuance to someone
     /// who is sure they already granted it.
-    private func requireScreenRecording() -> Bool {
-        if Permissions.screenRecordingGranted { return true }
+    /// Explains a screen-capture failure, but only after one has actually
+    /// happened.
+    ///
+    /// This used to run *before* the capture and refuse to continue when
+    /// `CGPreflightScreenCaptureAccess` said no. That was a mistake: the check
+    /// is a prediction, and it goes stale. MacToys is ad-hoc signed, so every
+    /// rebuild changes its signature and macOS stops recognising a grant that
+    /// was given to an earlier build — and macOS also caches the answer per
+    /// process, so granting while the app is running keeps reporting "denied"
+    /// until it is restarted. Either way the prediction said no while the
+    /// capture itself would have worked, and the feature was blocked for no
+    /// reason. Now the capture is always attempted and this only runs if
+    /// nothing came back.
+    private func explainScreenCaptureFailure() {
+        guard !Permissions.screenRecordingGranted else { return }
         Permissions.requestScreenRecording()
         Permissions.explainScreenRecording()
-        return false
     }
 
     private func performSnap(_ action: SnapAction) {
@@ -300,12 +312,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func snip(_ mode: SnipService.Mode) {
-        guard requireScreenRecording() else { return }
-        SnipService.capture(mode)
+        // Whether a capture actually happened is judged by the clipboard
+        // changing, not by the exit status: `screencapture` exits non-zero both
+        // when the user presses Escape and when it is blocked, and those two
+        // need very different responses.
+        let before = NSPasteboard.general.changeCount
+        SnipService.capture(mode) { [weak self] _ in
+            guard NSPasteboard.general.changeCount == before else { return }
+            self?.explainScreenCaptureFailure()
+        }
     }
 
     private func extractText() {
-        guard requireScreenRecording() else { return }
         TextExtractor.extract(languages: preferences.ocrLanguages,
                               joinLines: preferences.ocrJoinLines) { [weak self] result in
             guard let self = self else { return }
@@ -319,6 +337,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let lines = text.components(separatedBy: "\n").count
                 Toast.show("Copied \(text.count) characters (\(lines) line\(lines == 1 ? "" : "s"))")
             case .failure(let error):
+                // A capture that produced nothing is either Escape or a
+                // permission block; only the second deserves a dialog.
+                if case .cancelled = error {
+                    self.explainScreenCaptureFailure()
+                    return
+                }
+                if case .captureFailed = error {
+                    self.explainScreenCaptureFailure()
+                    return
+                }
                 if let message = error.errorDescription { Toast.show(message) }
             }
         }

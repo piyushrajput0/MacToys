@@ -30,11 +30,12 @@ enum Permissions {
         NSWorkspace.shared.open(url)
     }
 
-    /// True when the user has granted Screen Recording, which `screencapture`
-    /// needs on behalf of the app that invoked it — snipping and text
-    /// extraction both shell out to it. Checking this ourselves, rather than
-    /// letting `screencapture` fail silently, is what lets us explain a denial
-    /// instead of the feature just doing nothing.
+    /// Whether macOS currently believes this process may capture the screen.
+    ///
+    /// Only ever used to explain a failure that already happened, never to
+    /// decide whether to attempt one: the answer is cached per process and tied
+    /// to the code signature, so it goes stale and reports "denied" for a
+    /// capture that would have succeeded.
     static var screenRecordingGranted: Bool {
         CGPreflightScreenCaptureAccess()
     }
@@ -52,11 +53,29 @@ enum Permissions {
         NSWorkspace.shared.open(url)
     }
 
+    /// Restarts the app, which is what makes a newly granted permission take
+    /// effect: macOS answers the "may this process capture the screen" question
+    /// once per process and caches it.
+    static func relaunch() {
+        let path = Bundle.main.bundleURL.path
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // The delay lets this process finish quitting first, so the relaunch
+        // does not race a still-running instance.
+        task.arguments = ["-c", "sleep 1; open \"\(path)\""]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
     /// Explains why a permission is needed and offers to open the right pane.
     /// Returns true if the user chose to open Settings.
     @discardableResult
     static func explain(feature: String, permission: String, reason: String,
                         openSettings: @escaping () -> Void) -> Bool {
+        guard !isExplaining else { return false }
+        isExplaining = true
+        defer { isExplaining = false }
+
         let alert = NSAlert()
         alert.messageText = "\(feature) needs \(permission) access"
         alert.informativeText = reason + "\n\nOpen System Settings › Privacy & Security › \(permission) and switch on MacToys, then try again."
@@ -71,33 +90,44 @@ enum Permissions {
         return false
     }
 
-    /// The explanation shown whenever a screen capture is attempted without
-    /// Screen Recording access.
+    /// True while a permission dialog is on screen.
     ///
-    /// This covers both a first-time grant and the far more confusing case of
-    /// someone who is certain they already granted it: MacToys is ad-hoc
-    /// signed (there is no paid Apple Developer certificate behind it), so
-    /// every rebuild produces a new code signature, and macOS ties the grant
-    /// to that signature. A grant given to yesterday's build does not carry
-    /// over to today's — the entry can sit there checked in Settings and
-    /// still not apply, which is indistinguishable from macOS ignoring you.
+    /// `runModal()` spins a nested event loop, and global hotkeys keep firing
+    /// inside it — so pressing the snip shortcut again while the dialog was up
+    /// stacked another dialog behind it. Dismissing one just revealed the next,
+    /// which looked exactly like the dialog refusing to close.
+    private static var isExplaining = false
+
+    /// Shown after a screen capture has actually come back empty.
+    ///
+    /// Two things make this confusing for someone certain they already granted
+    /// access: macOS decides once per process and caches it, so a grant given
+    /// while the app was running does nothing until it restarts; and MacToys is
+    /// ad-hoc signed, so a rebuild changes its signature and macOS stops
+    /// recognising the grant even though the entry still looks switched on.
     static func explainScreenRecording() {
+        guard !isExplaining else { return }
+        isExplaining = true
+        defer { isExplaining = false }
+
         let alert = NSAlert()
         alert.messageText = "Screen Recording access needed"
         alert.informativeText = """
-        Snipping and text extraction both use the screen capture tool, which needs this permission.
+        Snipping and text extraction use the screen capture tool, which needs this permission.
 
-        1. Open Privacy & Security › Screen Recording
-        2. If MacToys is already listed, remove it first (select it, click “–”) — rebuilding the app changes its signature, so an old grant can stop applying even while it still looks switched on
-        3. Quit MacToys completely and reopen it
-        4. Try again and allow it when macOS asks
+        If you have already switched it on: macOS only re-checks this when an app starts, so MacToys has to be restarted before it takes effect. Use Quit & Reopen below.
+
+        If that does not help, the grant may belong to an earlier build — MacToys is ad-hoc signed, so rebuilding changes its signature and macOS stops recognising it, even though the entry still looks switched on. Remove MacToys from the list (select it, click “–”), then reopen and allow it again.
         """
         alert.alertStyle = .informational
+        alert.addButton(withTitle: "Quit & Reopen")
         alert.addButton(withTitle: "Open Settings")
         alert.addButton(withTitle: "Not Now")
         NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            openScreenRecordingSettings()
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:  relaunch()
+        case .alertSecondButtonReturn: openScreenRecordingSettings()
+        default: break
         }
     }
 }
