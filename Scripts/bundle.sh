@@ -53,10 +53,18 @@ if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
     cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature. macOS ties an Accessibility grant to the code signature, so
-# an unsigned binary is re-prompted constantly. Ad-hoc still changes on every
-# rebuild, which is why the README tells you to re-tick the box after updating.
-echo "==> Signing (ad-hoc)"
-codesign --force --sign - --timestamp=none "$APP" 2>&1 | sed 's/^/    /' || true
+# macOS ties Accessibility and Screen Recording grants to the code signature.
+# An ad-hoc signature changes on every rebuild, so every rebuild silently
+# revokes them. If Scripts/create-signing-identity.sh has been run there is a
+# stable certificate to use instead, and grants then survive rebuilds.
+IDENTITY="MacToys Self-Signed"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    echo "==> Signing with '$IDENTITY' (permissions persist across rebuilds)"
+    codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | sed 's/^/    /' || true
+else
+    echo "==> Signing (ad-hoc — permissions will reset on each rebuild)"
+    echo "    Run Scripts/create-signing-identity.sh once to stop that."
+    codesign --force --sign - --timestamp=none "$APP" 2>&1 | sed 's/^/    /' || true
+fi
 
 echo "==> Built $APP"

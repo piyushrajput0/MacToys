@@ -173,6 +173,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             row("Items to keep", capacityRow),
             checkbox("persistClipboardHistory", "Remember history after quitting"),
             checkbox("autoPasteOnPick", "Paste immediately when an item is chosen"),
+            heading("Snip to clipboard"),
+            checkbox("snipSavesToDisk", "Also save the file where macOS keeps screenshots"),
+            note("⇧⌘S always puts the capture on the clipboard so you can paste it straight away. With this on it also leaves a file — same folder and same naming as ⌘⇧4, so it sits alongside your other screenshots."),
             note("Automatic pasting needs Accessibility. Without it, choosing an item still copies it — press ⌘V yourself."),
             heading("Privacy"),
             note("Pasteboards marked as concealed are never recorded, and copies made in 1Password, Bitwarden, Dashlane, Enpass, LastPass, Keychain Access and Apple Passwords are ignored.\n\nHistory is stored unencrypted at ~/Library/Application Support/MacToys/. Turn off “Remember history” above to keep it in memory only."),
@@ -410,6 +413,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             "autoPasteOnPick": p.autoPasteOnPick,
             "snapCyclingEnabled": p.snapCyclingEnabled,
             "ocrJoinLines": p.ocrJoinLines,
+            "snipSavesToDisk": p.snipSavesToDisk,
             "windowsHomeEnd": p.remap.windowsHomeEnd,
             "finderCutPaste": p.remap.finderCutPaste,
             "finderForwardDelete": p.remap.finderForwardDelete,
@@ -447,6 +451,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         p.autoPasteOnPick         = on("autoPasteOnPick")
         p.snapCyclingEnabled      = on("snapCyclingEnabled")
         p.ocrJoinLines            = on("ocrJoinLines")
+        p.snipSavesToDisk         = on("snipSavesToDisk")
         p.volumeGestureEnabled    = on("volumeGestureEnabled")
         if let popup = fingersPopup { p.volumeGestureFingers = popup.indexOfSelectedItem == 0 ? 3 : 4 }
         if let slider = volumeSpeedSlider {

@@ -42,7 +42,7 @@ Everything is keyboard-first and runs from the menu bar.
 | Feature | Shortcut | Notes |
 |---|---|---|
 | **Clipboard history** | `⇧⌘V` | Searchable, pinnable. Text, images and files. Keeps the last 15 by default — pin anything you want to keep longer, or raise the limit in Settings (up to 1000). |
-| **Snip to clipboard** | `⇧⌘S` | Drag a region → straight onto the clipboard. |
+| **Snip to clipboard** | `⇧⌘S` | Drag a region → onto the clipboard, *and* saved where macOS keeps screenshots. |
 | **Extract text (OCR)** | `⌃⌥T` | Drag over anything on screen; the text lands on your clipboard. Runs on-device. |
 | **Colour picker** | `⌃⌥K` | Magnified loupe, copies as hex, `rgb()`, `hsl()`, SwiftUI or NSColor. |
 | **Paste as plain text** | `⇧⌥⌘V` | Strips fonts, colours and links from whatever you copied. |
@@ -56,6 +56,7 @@ Everything is keyboard-first and runs from the menu bar.
 | **Volume gesture** | 4 fingers ↑↓ | Windows 11's "Change audio and volume". Speed is adjustable; a normal swipe covers the full range. Off by default — see below. |
 | **Keep awake** | menu | Like PowerToys Awake. |
 | **Settings** | `⌘,` from the menu | Every option, plus a click-and-press shortcut recorder. |
+| **Diagnostics** | menu | What is actually working right now, and what to do about anything that is not. |
 
 The clipboard picker takes `↑``↓` to move, `⏎` to paste, `⌘1`–`⌘9` to grab an item
 directly, `⌘P` to pin, `⌘⌫` to delete, `esc` to dismiss. Just type to filter.
@@ -78,6 +79,13 @@ make app && open dist/MacToys.app
 ```
 
 `make test` runs the test suite. `make clean` removes build output.
+
+**Run `make cert` once.** macOS ties Accessibility and Screen Recording grants to
+the app's code signature, and an ad-hoc signature changes on every rebuild — so
+every rebuild silently revokes the permissions you granted while the checkbox
+still looks switched on. `make cert` creates a local self-signed identity so the
+signature stays stable and grants survive. It asks for your password, creates
+nothing but a certificate on this machine, and grants no one any access.
 
 Settings live in the menu bar icon → **Settings…**, including a shortcut recorder
 (click a binding, press the keys you want). Everything is also plain JSON at
@@ -114,6 +122,8 @@ ask for the same one) and it is granted per-app in
 If you'd rather not grant it, the first column still works and MacToys will never
 nag you — it just tells you once, at the moment you press a shortcut that needs it.
 
+> **Run `make cert` once and this stops happening.** Otherwise:
+>
 > **Rebuilding resets both permissions.** Accessibility and Screen Recording are
 > both tied to the app's code signature. This project signs ad-hoc, so the
 > signature changes on every build and macOS treats each rebuild as a new app —
@@ -250,7 +260,7 @@ config)` — no event tap needed to test it.
 make test
 ```
 
-116 tests, 249 assertions, no permissions and no GUI required. XCTest ships with
+122 tests, 262 assertions, no permissions and no GUI required. XCTest ships with
 Xcode rather than the Command Line Tools, so the suite is a plain executable that
 exits non-zero on failure — which also makes it trivial to run in CI.
 

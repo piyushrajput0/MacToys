@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let awake = AwakeService()
     private let volumeGesture = VolumeGestureService()
     private let cheatSheet = CheatSheetWindow()
+    private let diagnostics = DiagnosticsWindowController()
     private var settings: SettingsWindowController!
 
     private var panel: ClipboardPanelController!
@@ -46,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onStoreMutated = { [weak self] in self?.scheduleSave() }
         settings = SettingsWindowController(preferences: preferences)
         settings.onChange = { [weak self] updated in self?.apply(updated) }
+        diagnostics.reportProvider = { [weak self] in
+            self?.buildDiagnostics() ?? DiagnosticsReport(generatedAt: Date(), items: [])
+        }
 
         startClipboard()
         registerHotKeys()
@@ -61,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         installTerminationHandlers()
+        writeDiagnostics()
 
         if !hotKeys.conflicts.isEmpty {
             Toast.show("Some shortcuts were already taken: \(hotKeys.conflicts.joined(separator: ", "))", duration: 4)
@@ -312,14 +317,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func snip(_ mode: SnipService.Mode) {
-        // Whether a capture actually happened is judged by the clipboard
-        // changing, not by the exit status: `screencapture` exits non-zero both
-        // when the user presses Escape and when it is blocked, and those two
-        // need very different responses.
-        let before = NSPasteboard.general.changeCount
-        SnipService.capture(mode) { [weak self] _ in
-            guard NSPasteboard.general.changeCount == before else { return }
-            self?.explainScreenCaptureFailure()
+        SnipService.capture(mode, saveToDisk: preferences.snipSavesToDisk) { [weak self] result in
+            guard let self = self else { return }
+            guard result.captured else {
+                // Nothing came back: either Escape, or the capture was blocked.
+                self.explainScreenCaptureFailure()
+                return
+            }
+            if let url = result.savedTo {
+                Toast.show("Copied — also saved as \(url.lastPathComponent)")
+            }
         }
     }
 
@@ -430,7 +437,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.update(preferences: preferences)
         registerHotKeys()
         saveHistory()
+        writeDiagnostics()
         rebuildMenu()
+        refreshStatusIcon()
     }
 
     private func applyLaunchAtLogin() {
@@ -486,18 +495,138 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    // MARK: - Diagnostics
+
+    /// Builds the health report. Everything here is observed state, not a
+    /// restatement of the settings: whether the event tap is genuinely
+    /// installed, whether a hotkey was actually claimed, whether the trackpad
+    /// reader started. Those are the things that silently differ from what the
+    /// checkboxes claim.
+    private func buildDiagnostics() -> DiagnosticsReport {
+        var items: [DiagnosticItem] = []
+
+        let accessibility = Permissions.accessibilityGranted
+        items.append(DiagnosticItem(
+            feature: "Accessibility permission",
+            state: accessibility ? .ok : .blocked,
+            detail: accessibility
+                ? "Granted to this build."
+                : "Not granted to this build of MacToys. Window snapping and Windows key behaviour cannot work without it.",
+            fix: accessibility ? nil
+                : "System Settings › Privacy & Security › Accessibility. If MacToys is already listed, remove it first — rebuilding changes its signature, so an old grant stops applying."))
+
+        let screen = Permissions.screenRecordingGranted
+        items.append(DiagnosticItem(
+            feature: "Screen Recording permission",
+            state: screen ? .ok : .blocked,
+            detail: screen
+                ? "Granted to this build."
+                : "macOS says this build cannot capture the screen. Snip and text extraction will be refused.",
+            fix: screen ? nil
+                : "Try the shortcut anyway — this answer is cached per launch and goes stale. If it really fails, grant it and reopen MacToys."))
+
+        items.append(DiagnosticItem(
+            feature: "Clipboard history",
+            state: preferences.clipboardHistoryEnabled ? .ok : .off,
+            detail: preferences.clipboardHistoryEnabled
+                ? "Watching the clipboard. \(store.items.count) of \(preferences.clipboardCapacity) items kept."
+                : "Switched off in Settings."))
+
+        // The Finder shortcuts and Home/End all ride on one event tap; if it is
+        // not installed, none of them do anything, whatever the boxes say.
+        let wantsRemap = preferences.keyRemapEnabled
+        let tapRunning = remapper.isRunning
+        items.append(DiagnosticItem(
+            feature: "Windows key behaviour (⌘X/⌘V in Finder, Home/End, ⌦)",
+            state: !wantsRemap ? .off : (tapRunning ? .ok : .blocked),
+            detail: !wantsRemap
+                ? "Switched off in Settings › Keyboard."
+                : (tapRunning
+                    ? "Keyboard tap is installed and rewriting keys."
+                    : "Switched on, but the keyboard tap is NOT running, so none of these shortcuts do anything."),
+            fix: (wantsRemap && !tapRunning)
+                ? (accessibility
+                    ? "Accessibility is granted but the tap did not start — reopen MacToys."
+                    : "Grant Accessibility, then reopen MacToys.")
+                : nil))
+
+        let snapOK = preferences.windowSnapEnabled && accessibility
+        items.append(DiagnosticItem(
+            feature: "Window snapping",
+            state: !preferences.windowSnapEnabled ? .off : (snapOK ? .ok : .blocked),
+            detail: !preferences.windowSnapEnabled
+                ? "Switched off in Settings."
+                : (snapOK ? "Ready." : "Switched on, but needs Accessibility before it can move windows."),
+            fix: (preferences.windowSnapEnabled && !accessibility) ? "Grant Accessibility, then reopen MacToys." : nil))
+
+        let gestureWanted = preferences.volumeGestureEnabled
+        let gestureRunning = volumeGesture.isRunning
+        items.append(DiagnosticItem(
+            feature: "Trackpad volume gesture",
+            state: !gestureWanted ? .off : (gestureRunning ? .ok : .broken),
+            detail: !gestureWanted
+                ? "Switched off in Settings › Trackpad."
+                : (gestureRunning
+                    ? "Reading the trackpad with \(preferences.volumeGestureFingers) fingers."
+                    : (volumeGesture.lastFailure ?? "Could not read the trackpad.")),
+            fix: (gestureWanted && !gestureRunning) ? "Reopen MacToys; if it persists, switch it off in Settings › Trackpad." : nil))
+
+        let volume = AudioController.volume
+        items.append(DiagnosticItem(
+            feature: "Volume control",
+            state: volume == nil ? .broken : .ok,
+            detail: volume == nil
+                ? "The current output device exposes no adjustable volume, so the gesture cannot change it."
+                : "Output volume is \(Int((volume! * 100).rounded()))%.",
+            fix: volume == nil ? "Switch to an output that has its own volume, such as the built-in speakers." : nil))
+
+        if hotKeys.conflicts.isEmpty {
+            items.append(DiagnosticItem(
+                feature: "Keyboard shortcuts",
+                state: .ok,
+                detail: "All shortcuts were claimed successfully."))
+        } else {
+            items.append(DiagnosticItem(
+                feature: "Keyboard shortcuts",
+                state: .broken,
+                detail: "Another app already owns: \(hotKeys.conflicts.joined(separator: ", ")).",
+                fix: "Pick different keys in Settings › Shortcuts."))
+        }
+
+        return DiagnosticsReport(generatedAt: Date(), items: items)
+    }
+
+    /// Also written to disk each launch, so the state can be inspected without
+    /// opening the app.
+    private func writeDiagnostics() {
+        let report = buildDiagnostics()
+        guard let data = try? JSONEncoder().encode(report) else { return }
+        try? Preferences.ensureSupportDirectory()
+        try? data.write(to: Preferences.supportDirectory.appendingPathComponent("diagnostics.json"),
+                        options: .atomic)
+    }
+
+    @objc private func showDiagnostics() { diagnostics.show() }
+
     // MARK: - Menu bar
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            // A template image adapts to light and dark menu bars automatically.
-            let image = NSImage(systemSymbolName: "square.on.square.dashed", accessibilityDescription: "MacToys")
-            image?.isTemplate = true
-            button.image = image
-            button.toolTip = "MacToys"
-        }
+        refreshStatusIcon()
         rebuildMenu()
+    }
+
+    /// The icon carries a warning when something is switched on but not
+    /// actually working, so a dead feature is visible without hunting for it.
+    private func refreshStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        let report = buildDiagnostics()
+        let name = report.isHealthy ? "square.on.square.dashed" : "exclamationmark.triangle"
+        // A template image adapts to light and dark menu bars automatically.
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "MacToys")
+        image?.isTemplate = true
+        button.image = image
+        button.toolTip = report.isHealthy ? "MacToys" : "MacToys — \(report.summary)"
     }
 
     private func rebuildMenu() {
@@ -511,9 +640,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
+        let report = buildDiagnostics()
         let header = NSMenuItem(title: "MacToys", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+
+        // Lead with anything broken rather than burying it.
+        for problem in report.problems.prefix(3) {
+            let item = NSMenuItem(title: "\(problem.symbol) \(problem.feature)",
+                                  action: #selector(showDiagnostics), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
 
         add("Clipboard History   \(preferences.spec("clipboardHistory")?.description ?? "")", #selector(showClipboard))
@@ -562,6 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add(permissionTitle, Permissions.accessibilityGranted ? nil : #selector(openAccessibility))
 
         add("Settings…", #selector(showSettings), key: ",")
+        add("Diagnostics…", #selector(showDiagnostics))
         add("Cheat Sheet…", #selector(showCheatSheet))
         add("Open Config Folder", #selector(openConfigFolder))
         add("Clear Clipboard History", #selector(clearHistory))

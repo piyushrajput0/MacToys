@@ -997,4 +997,60 @@ t.test("even the slowest setting reaches a usable amount of the range") {
     t.expect(steps >= 6, "the slow end should still be usable, got \(steps)")
 }
 
+
+// ───────────────────────────────────────────────────────────── Diagnostics ────
+t.group("Diagnostics")
+
+t.test("a healthy report says so") {
+    let r = DiagnosticsReport(generatedAt: Date(timeIntervalSince1970: 0), items: [
+        DiagnosticItem(feature: "A", state: .ok, detail: "fine"),
+        DiagnosticItem(feature: "B", state: .off, detail: "switched off"),
+    ])
+    t.expect(r.isHealthy, "deliberately-off features are not faults")
+    t.equal(r.summary, "Everything is working")
+    t.equal(r.problems.count, 0)
+}
+
+t.test("blocked and broken features are surfaced") {
+    let r = DiagnosticsReport(generatedAt: Date(timeIntervalSince1970: 0), items: [
+        DiagnosticItem(feature: "A", state: .ok, detail: "fine"),
+        DiagnosticItem(feature: "B", state: .blocked, detail: "needs permission", fix: "grant it"),
+        DiagnosticItem(feature: "C", state: .broken, detail: "failed"),
+    ])
+    t.expect(!r.isHealthy)
+    t.equal(r.problems.count, 2)
+    t.expect(r.summary.contains("1 broken"), "got \(r.summary)")
+    t.expect(r.summary.contains("1 need attention"), "got \(r.summary)")
+}
+
+t.test("an off feature is never reported as a problem") {
+    // Switching something off deliberately must not nag.
+    let r = DiagnosticsReport(generatedAt: Date(timeIntervalSince1970: 0), items: [
+        DiagnosticItem(feature: "A", state: .off, detail: "off"),
+    ])
+    t.expect(r.isHealthy)
+}
+
+t.test("the plain-text report includes fixes") {
+    let r = DiagnosticsReport(generatedAt: Date(timeIntervalSince1970: 0), items: [
+        DiagnosticItem(feature: "Keyboard", state: .blocked, detail: "tap not running", fix: "Grant Accessibility"),
+    ])
+    let text = r.plainText()
+    t.expect(text.contains("Keyboard"))
+    t.expect(text.contains("tap not running"))
+    t.expect(text.contains("Grant Accessibility"), "the fix must be in the copyable report")
+}
+
+t.test("report survives a JSON round trip") {
+    let r = DiagnosticsReport(generatedAt: Date(timeIntervalSince1970: 12345), items: [
+        DiagnosticItem(feature: "A", state: .broken, detail: "d", fix: "f"),
+    ])
+    let back = try JSONDecoder().decode(DiagnosticsReport.self, from: try JSONEncoder().encode(r))
+    t.equal(back, r)
+}
+
+t.test("snip-to-disk defaults to on") {
+    t.expect(Preferences().snipSavesToDisk, "the file should be kept unless asked otherwise")
+}
+
 exit(t.report())

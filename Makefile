@@ -1,4 +1,4 @@
-.PHONY: all build test app run install clean
+.PHONY: all build test app run install clean cert
 
 all: test app
 
@@ -20,6 +20,9 @@ install: app
 	rm -rf /Applications/MacToys.app
 	cp -R dist/MacToys.app /Applications/
 	@echo "Installed to /Applications/MacToys.app"
+
+cert:
+	./Scripts/create-signing-identity.sh
 
 clean:
 	rm -rf .build dist
