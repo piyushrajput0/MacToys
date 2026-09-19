@@ -16,7 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
 
     private var panel: ClipboardPanelController!
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
+    /// Nil until the post-layout check has run.
+    private var statusItemPlaced: Bool?
     private var localKeyMonitor: Any?
     private var saveTimer: Timer?
     private var pendingSave: DispatchWorkItem?
@@ -419,11 +421,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      sensitivity: preferences.volumeGestureSensitivity)
             } else if !volumeGesture.start(fingers: preferences.volumeGestureFingers,
                                            sensitivity: preferences.volumeGestureSensitivity) {
-                // The private framework this relies on can disappear in a
-                // future macOS; say so rather than leaving a dead checkbox.
-                preferences.volumeGestureEnabled = false
-                try? preferences.save()
-                settings.update(preferences: preferences)
+                // Say so, but leave the preference alone. An earlier version
+                // wrote `enabled = false` to disk here, so a single transient
+                // failure — the trackpad not yet re-enumerated after waking,
+                // say — switched the feature off permanently and silently, and
+                // the user was left with a setting that had turned itself off.
+                // Diagnostics reports it as broken instead, and it is retried
+                // on the next wake or launch.
                 Toast.show(volumeGesture.lastFailure ?? "Volume gesture is unavailable", duration: 4)
             }
         } else if volumeGesture.isRunning {
@@ -437,9 +441,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.update(preferences: preferences)
         registerHotKeys()
         saveHistory()
+        buildStatusItem()
         writeDiagnostics()
-        rebuildMenu()
-        refreshStatusIcon()
+        if statusItem != nil {
+            rebuildMenu()
+            refreshStatusIcon()
+        }
     }
 
     private func applyLaunchAtLogin() {
@@ -561,14 +568,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let gestureWanted = preferences.volumeGestureEnabled
         let gestureRunning = volumeGesture.isRunning
+        let gestureDetail: String
+        if !gestureWanted {
+            gestureDetail = "Switched off in Settings › Trackpad."
+        } else if gestureRunning {
+            // Frames only arrive while the pad is touched, so "no touches yet"
+            // is normal rather than a fault.
+            let seen = volumeGesture.lastFrameTime == nil
+                ? " No touches seen yet."
+                : " Last touch seen \(Int(Date().timeIntervalSince(volumeGesture.lastFrameTime!)))s ago."
+            gestureDetail = "Attached to the trackpad with \(preferences.volumeGestureFingers) fingers." + seen
+        } else {
+            gestureDetail = volumeGesture.lastFailure ?? "Could not read the trackpad."
+        }
         items.append(DiagnosticItem(
             feature: "Trackpad volume gesture",
             state: !gestureWanted ? .off : (gestureRunning ? .ok : .broken),
-            detail: !gestureWanted
-                ? "Switched off in Settings › Trackpad."
-                : (gestureRunning
-                    ? "Reading the trackpad with \(preferences.volumeGestureFingers) fingers."
-                    : (volumeGesture.lastFailure ?? "Could not read the trackpad.")),
+            detail: gestureDetail,
             fix: (gestureWanted && !gestureRunning) ? "Reopen MacToys; if it persists, switch it off in Settings › Trackpad." : nil))
 
         let volume = AudioController.volume
@@ -579,6 +595,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? "The current output device exposes no adjustable volume, so the gesture cannot change it."
                 : "Output volume is \(Int((volume! * 100).rounded()))%.",
             fix: volume == nil ? "Switch to an output that has its own volume, such as the built-in speakers." : nil))
+
+        if !preferences.showMenuBarIcon {
+            items.append(DiagnosticItem(
+                feature: "Menu bar icon",
+                state: .off,
+                detail: "Hidden on purpose — MacToys is running in the background. Every shortcut still works; open the app again to get back to Settings."))
+        } else if statusItemPlaced == false {
+            items.append(DiagnosticItem(
+                feature: "Menu bar icon",
+                state: .broken,
+                detail: "MacToys asked for a menu bar slot but macOS did not give it one — usually because the menu bar is full.",
+                fix: "Remove a few other menu bar icons, or hide this one in Settings › General and run in the background."))
+        } else {
+            items.append(DiagnosticItem(
+                feature: "Menu bar icon",
+                state: .ok,
+                detail: statusItemPlaced == nil ? "Created." : "Showing in the menu bar."))
+        }
 
         if hotKeys.conflicts.isEmpty {
             items.append(DiagnosticItem(
@@ -610,10 +644,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu bar
 
+    /// Creates or removes the menu bar icon to match the preference.
+    ///
+    /// With it hidden MacToys runs entirely in the background: every shortcut
+    /// still works, and opening the app again brings up Settings, so there is
+    /// always a way back in.
     private func buildStatusItem() {
+        guard preferences.showMenuBarIcon else {
+            if let existing = statusItem {
+                NSStatusBar.system.removeStatusItem(existing)
+                statusItem = nil
+            }
+            return
+        }
+        guard statusItem == nil else {
+            refreshStatusIcon()
+            rebuildMenu()
+            return
+        }
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem?.behavior = []
+        // Survives across launches so macOS does not quietly hide it.
+        statusItem?.autosaveName = "MacToysStatusItem"
+        statusItem?.isVisible = true
         refreshStatusIcon()
         rebuildMenu()
+        verifyStatusItemAppeared()
+    }
+
+    /// The menu bar lays the item out asynchronously, so its frame is
+    /// meaningless for about a second after creation. Checking afterwards is
+    /// the only way to tell a genuinely hidden icon from one that simply had
+    /// not been positioned yet.
+    private func verifyStatusItemAppeared() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self = self, let item = self.statusItem else { return }
+            let frame = item.button?.window?.frame ?? .zero
+            let placed = item.isVisible && frame.width > 0 && frame.height > 0
+            self.statusItemPlaced = placed
+            if !placed {
+                NSLog("[MacToys] the menu bar icon did not get a place in the menu bar (frame \(frame)). The menu bar may be full.")
+            }
+            self.writeDiagnostics()
+        }
     }
 
     /// The icon carries a warning when something is switched on but not
@@ -630,6 +704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu() {
+        guard statusItem != nil else { return }
         let menu = NSMenu()
 
         func add(_ title: String, _ selector: Selector?, key: String = "", enabled: Bool = true, state: NSControl.StateValue? = nil) {
@@ -709,7 +784,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add("Launch at Login", #selector(toggleLaunchAtLogin), state: preferences.launchAtLogin ? .on : .off)
         add("Quit MacToys", #selector(quit), key: "q")
 
-        statusItem.menu = menu
+        statusItem?.menu = menu
     }
 
     // MARK: - Menu actions

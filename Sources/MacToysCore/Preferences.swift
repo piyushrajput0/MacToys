@@ -22,6 +22,10 @@ public struct Preferences: Codable, Equatable {
     /// Also leave the snip as a file where macOS normally puts screenshots,
     /// instead of only placing it on the clipboard.
     public var snipSavesToDisk: Bool
+    /// Show the menu bar icon. Turning this off runs MacToys entirely in the
+    /// background — every shortcut still works; open the app again to reach
+    /// Settings.
+    public var showMenuBarIcon: Bool
 
     // Clipboard
     public var clipboardCapacity: Int
@@ -79,6 +83,7 @@ public struct Preferences: Codable, Equatable {
                 volumeGestureFingers: Int = 4,
                 volumeGestureSensitivity: Double = 0.028,
                 snipSavesToDisk: Bool = true,
+                showMenuBarIcon: Bool = true,
                 clipboardCapacity: Int = 15,
                 clipboardPollInterval: Double = 0.4,
                 persistClipboardHistory: Bool = true,
@@ -102,6 +107,7 @@ public struct Preferences: Codable, Equatable {
         self.volumeGestureFingers = volumeGestureFingers
         self.volumeGestureSensitivity = volumeGestureSensitivity
         self.snipSavesToDisk = snipSavesToDisk
+        self.showMenuBarIcon = showMenuBarIcon
         self.clipboardCapacity = clipboardCapacity
         self.clipboardPollInterval = clipboardPollInterval
         self.persistClipboardHistory = persistClipboardHistory
@@ -138,6 +144,7 @@ public struct Preferences: Codable, Equatable {
         volumeGestureFingers    = v(.volumeGestureFingers, d.volumeGestureFingers)
         volumeGestureSensitivity = v(.volumeGestureSensitivity, d.volumeGestureSensitivity)
         snipSavesToDisk         = v(.snipSavesToDisk, d.snipSavesToDisk)
+        showMenuBarIcon         = v(.showMenuBarIcon, d.showMenuBarIcon)
         clipboardCapacity       = v(.clipboardCapacity, d.clipboardCapacity)
         clipboardPollInterval   = v(.clipboardPollInterval, d.clipboardPollInterval)
         persistClipboardHistory = v(.persistClipboardHistory, d.persistClipboardHistory)

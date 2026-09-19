@@ -15,6 +15,15 @@ final class VolumeGestureService {
     private(set) var isRunning = false
     var lastFailure: String? { reader.lastFailure }
 
+    /// When the trackpad last delivered anything. Frames only arrive while the
+    /// pad is being touched, so this cannot prove the subscription is alive —
+    /// but a value from before the last sleep is strong evidence it is not.
+    private(set) var lastFrameTime: Date?
+
+    private var wakeObserver: NSObjectProtocol?
+    private var currentFingers = 4
+    private var currentSensitivity = 0.028
+
     /// Most steps one frame may apply. Anything above this is carried over to
     /// the next frame rather than dropped, so the volume still travels the full
     /// distance the swipe asked for — just spread over a frame or two.
@@ -23,16 +32,59 @@ final class VolumeGestureService {
     @discardableResult
     func start(fingers: Int, sensitivity: Double) -> Bool {
         stop()
+        currentFingers = fingers
+        currentSensitivity = sensitivity
         recognizer = VolumeGestureRecognizer(requiredFingers: fingers,
                                              stepDistance: sensitivity)
+        observeWake()
         reader.onFrame = { [weak self] fingers, x, y in
+            self?.lastFrameTime = Date()
             self?.handle(fingers: fingers, x: x, y: y)
         }
         isRunning = reader.start()
         return isRunning
     }
 
+    /// The multitouch subscription does not survive the machine sleeping: the
+    /// callback is simply never invoked again, with no error and no indication
+    /// that anything is wrong. Re-registering on wake is the fix, and is why
+    /// the gesture used to work until the first time the lid was closed.
+    private func observeWake() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.isRunning else { return }
+            // A moment for the trackpad to be re-enumerated before re-attaching.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                guard self.isRunning else { return }
+                self.reattach()
+            }
+        }
+    }
+
+    /// Tears the subscription down and builds it again, preserving settings.
+    private func reattach() {
+        reader.stop()
+        reader.onFrame = { [weak self] fingers, x, y in
+            self?.lastFrameTime = Date()
+            self?.handle(fingers: fingers, x: x, y: y)
+        }
+        recognizer.reset()
+        pendingSteps = 0
+        if !reader.start() {
+            NSLog("[MacToys] could not re-attach to the trackpad after wake: \(reader.lastFailure ?? "unknown")")
+            isRunning = false
+        }
+    }
+
     func stop() {
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            wakeObserver = nil
+        }
         reader.onFrame = nil
         reader.stop()
         recognizer.reset()

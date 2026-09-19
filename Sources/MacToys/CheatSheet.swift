@@ -43,7 +43,7 @@ final class CheatSheetWindow {
 
         let width: CGFloat = 660
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 560),
-                         styleMask: [.titled, .closable],
+                         styleMask: [.titled, .closable, .miniaturizable],
                          backing: .buffered,
                          defer: false)
         w.title = "MacToys — Windows to Mac Cheat Sheet"

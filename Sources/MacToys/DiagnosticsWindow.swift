@@ -20,7 +20,7 @@ final class DiagnosticsWindowController: NSObject {
 
     private func build() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
-                         styleMask: [.titled, .closable],
+                         styleMask: [.titled, .closable, .miniaturizable],
                          backing: .buffered, defer: false)
         w.title = "MacToys Diagnostics"
         w.isReleasedWhenClosed = false

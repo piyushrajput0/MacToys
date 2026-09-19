@@ -1053,4 +1053,38 @@ t.test("snip-to-disk defaults to on") {
     t.expect(Preferences().snipSavesToDisk, "the file should be kept unless asked otherwise")
 }
 
+
+// ────────────────────────────────────────────── Background mode / icon ────
+t.group("Menu bar and background mode")
+
+t.test("the menu bar icon is shown by default") {
+    t.expect(Preferences().showMenuBarIcon)
+}
+
+t.test("hiding the icon survives a save and reload") {
+    var p = Preferences()
+    p.showMenuBarIcon = false
+    let back = try JSONDecoder().decode(Preferences.self, from: try JSONEncoder().encode(p))
+    t.expect(!back.showMenuBarIcon, "background mode must not silently switch itself back on")
+}
+
+t.test("a config from before this option defaults to showing the icon") {
+    // Someone upgrading must not suddenly lose their menu bar icon.
+    let old = #"{"clipboardCapacity":15}"#
+    let p = try JSONDecoder().decode(Preferences.self, from: Data(old.utf8))
+    t.expect(p.showMenuBarIcon, "missing key must default to visible, not hidden")
+}
+
+t.test("hiding the icon does not disable any feature") {
+    // Background mode is purely cosmetic: the shortcuts must be untouched.
+    var p = Preferences()
+    p.showMenuBarIcon = false
+    t.expect(p.clipboardHistoryEnabled)
+    t.expect(p.snipEnabled)
+    t.expect(p.windowSnapEnabled)
+    for name in Preferences.defaultShortcuts.keys {
+        t.expect(p.spec(name) != nil, "\(name) must still be bound in background mode")
+    }
+}
+
 exit(t.report())

@@ -80,11 +80,13 @@ A clipboard manager sees everything you copy, so:
   `~/Library/Application Support/MacToys/`. Turn off *Remember history* in
   Settings to keep it in memory only.
 
+## Running in the background
+
+Don't want another menu bar icon? **Settings → General → Menu bar** turns it off.
+Every shortcut keeps working; open MacToys again any time to get back to Settings.
+
 ## Known issues
 
-- **The volume gesture stops after the Mac sleeps.** The trackpad subscription
-  doesn't survive sleep and isn't re-established yet — quit and reopen MacToys
-  to restore it.
 - **Four-finger swipes also trigger Mission Control**, because a passive reader
   can't take a gesture away from macOS. Either free it up in System Settings →
   Trackpad → More Gestures, or switch to three fingers in Settings → Trackpad.
@@ -94,7 +96,7 @@ A clipboard manager sees everything you copy, so:
 ## Development
 
 ```bash
-make test   # 122 tests, no GUI or permissions needed
+make test   # 126 tests, no GUI or permissions needed
 make app    # build without installing
 ```
 

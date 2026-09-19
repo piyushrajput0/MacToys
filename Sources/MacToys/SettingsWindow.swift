@@ -52,7 +52,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func build() {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 470),
-                         styleMask: [.titled, .closable],
+                         styleMask: [.titled, .closable, .miniaturizable],
                          backing: .buffered,
                          defer: false)
         w.title = "MacToys Settings"
@@ -148,6 +148,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             note("Window snapping and Windows key behaviour need Accessibility permission. Everything else works without granting anything."),
             heading("Startup"),
             checkbox("launchAtLogin", "Launch MacToys at login"),
+            heading("Menu bar"),
+            checkbox("showMenuBarIcon", "Show the MacToys icon in the menu bar"),
+            note("Turn this off to run entirely in the background — every shortcut keeps working, and the icon stops taking up menu bar space. To get back here, just open MacToys again."),
         ])
     }
 
@@ -414,6 +417,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             "snapCyclingEnabled": p.snapCyclingEnabled,
             "ocrJoinLines": p.ocrJoinLines,
             "snipSavesToDisk": p.snipSavesToDisk,
+            "showMenuBarIcon": p.showMenuBarIcon,
             "windowsHomeEnd": p.remap.windowsHomeEnd,
             "finderCutPaste": p.remap.finderCutPaste,
             "finderForwardDelete": p.remap.finderForwardDelete,
@@ -452,6 +456,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         p.snapCyclingEnabled      = on("snapCyclingEnabled")
         p.ocrJoinLines            = on("ocrJoinLines")
         p.snipSavesToDisk         = on("snipSavesToDisk")
+        p.showMenuBarIcon         = on("showMenuBarIcon")
         p.volumeGestureEnabled    = on("volumeGestureEnabled")
         if let popup = fingersPopup { p.volumeGestureFingers = popup.indexOfSelectedItem == 0 ? 3 : 4 }
         if let slider = volumeSpeedSlider {
