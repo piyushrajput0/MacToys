@@ -70,7 +70,10 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
           rm -f "$RUNNER_TEMP/cert.p12"
 
-          security find-identity -v -p codesigning "$KEYCHAIN"
+          # Without -v. With it the log reads "0 valid identities found" — true,
+          # since a self-signed certificate has no trust chain, but it looks
+          # exactly like the import failed when it in fact succeeded.
+          security find-identity -p codesigning "$KEYCHAIN"
           echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Bundle the app
