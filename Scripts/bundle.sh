@@ -60,7 +60,11 @@ fi
 # stable certificate to use instead, and grants then survive rebuilds.
 # Overridable so CI can sign with the release identity instead of a local one.
 IDENTITY="${MACTOYS_SIGN_IDENTITY:-MacToys Self-Signed}"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+# No -v here. That filters to identities with a valid trust chain, which a
+# self-signed certificate never has unless it was explicitly trusted — yet
+# codesign signs with it perfectly well. Asking the trust question instead of
+# the signing question made release builds fall back to ad-hoc.
+if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
     echo "==> Signing with '$IDENTITY' (permissions persist across rebuilds)"
     codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | sed 's/^/    /' || true
 else
