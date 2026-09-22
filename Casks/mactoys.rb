@@ -1,6 +1,6 @@
 cask "mactoys" do
-  version "0.0.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "1.0.0"
+  sha256 "2fa1ce8f639a1be5c3b07a7158ee2627d126391a1211be944a344e72c76f26e7"
 
   url "https://github.com/piyushrajput0/MacToys/releases/download/v#{version}/MacToys-#{version}.zip"
   name "MacToys"
