@@ -1,9 +1,13 @@
 ## Install
 
-```
+```bash
 brew tap piyushrajput0/mactoys https://github.com/piyushrajput0/MacToys
+brew trust --cask piyushrajput0/mactoys/mactoys
 brew install --cask mactoys
 ```
+
+Homebrew will not install a cask from a personal tap until you say you trust
+it, which is what the middle line does.
 
 Or download the zip below, unzip it, and drag **MacToys.app** into your
 Applications folder.

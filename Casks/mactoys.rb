@@ -7,7 +7,7 @@ cask "mactoys" do
   desc "Clipboard history, snip, OCR, window snapping — the Windows features macOS never shipped"
   homepage "https://github.com/piyushrajput0/MacToys"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "MacToys.app"
 

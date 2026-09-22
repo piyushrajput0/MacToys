@@ -21,8 +21,14 @@ Needs macOS 13 or newer.
 
 ```bash
 brew tap piyushrajput0/mactoys https://github.com/piyushrajput0/MacToys
+brew trust --cask piyushrajput0/mactoys/mactoys
 brew install --cask mactoys
 ```
+
+The middle line is Homebrew's doing, not mine: it will not install a cask from
+anyone's personal tap until you say you trust that tap. It is asking a fair
+question, so the answer is in the open — [Casks/mactoys.rb](Casks/mactoys.rb) is
+twenty lines and CI is the only thing that ever writes to it.
 
 Or [**download the latest release**][latest], unzip it, and drag `MacToys.app`
 into your Applications folder.
