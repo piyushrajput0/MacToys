@@ -20,6 +20,10 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The cask-update step commits back to main, and release notes
+          # are generated from history — neither works on a shallow tag clone.
+          fetch-depth: 0
 
       - name: Work out the version
         id: version
