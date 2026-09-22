@@ -131,6 +131,49 @@ never changes the volume, that resting fingers do not drift it, and that holding
 still after a swipe stops rather than continuing, and that an identical swipe
 moves the volume the same amount whether performed quickly or slowly.
 
+## Releasing
+
+Tag it and CI does the rest:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+`.github/workflows/release.yml` runs the tests, builds and signs the bundle,
+stamps the tag as the version, zips it with `ditto` (which preserves the code
+signature — plain `zip` does not), publishes the GitHub release, and points
+`Casks/mactoys.rb` at the new zip and its SHA.
+
+### The signing certificate, and why it matters
+
+macOS ties Accessibility and Screen Recording grants to an app's code signature.
+An ad-hoc signature is different on every single build, so a user who updates an
+ad-hoc release silently loses every permission they granted — while the
+checkboxes in System Settings still look switched on. It is a miserable bug to
+diagnose because nothing appears wrong.
+
+So every release is signed with one certificate that never changes, created once
+by `Scripts/create-release-identity.sh` and held in two repository secrets:
+
+| Secret | What it is |
+|---|---|
+| `MACTOYS_SIGNING_CERT_P12` | base64 of the `.p12` |
+| `MACTOYS_SIGNING_CERT_PASSWORD` | the password protecting it |
+
+`bundle.sh` quietly falls back to ad-hoc signing when it cannot find the
+identity, which is right for a local build and wrong for a release — so the
+workflow asserts the shipped bundle really was signed with `MacToys Release` and
+fails the build otherwise, rather than shipping something that resets everyone's
+permissions a month later.
+
+Losing that certificate is not fatal, but the next release signs under a new
+identity and everyone re-grants permissions once. Keep the `.p12`.
+
+This is a self-signed certificate, not an Apple Developer ID. It fixes the
+permissions problem but not Gatekeeper: first launch still warns that the
+developer cannot be verified, and only Apple's $99/year programme removes that.
+The two are independent — this is the half that is free.
+
 ## Limitations
 
 - **Full-screen windows can't be snapped.** macOS gives them their own Space and

@@ -1,0 +1,149 @@
+name: Release
+
+# Tag a version and this builds, signs, and publishes the download:
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without the leading v)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION"
+
+      - name: Test
+        run: swift run MacToysSelfTest
+
+      # macOS ties Accessibility and Screen Recording grants to the code
+      # signature. Signing every release with one stable certificate is what
+      # stops an update from silently revoking the permissions people granted.
+      # See Scripts/create-release-identity.sh.
+      - name: Import the release signing certificate
+        id: signing
+        env:
+          CERT_P12: ${{ secrets.MACTOYS_SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACTOYS_SIGNING_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "No signing certificate configured — this release will be ad-hoc signed."
+            echo "Everyone who installs it will have to re-grant permissions on the NEXT update."
+            echo "Fix that by running Scripts/create-release-identity.sh once."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+              -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle the app
+        env:
+          MACTOYS_VERSION: ${{ steps.version.outputs.version }}
+          MACTOYS_SIGN_IDENTITY: MacToys Release
+        run: ./Scripts/bundle.sh release
+
+      # bundle.sh falls back to an ad-hoc signature when it cannot find the
+      # identity, which would ship a release that resets everyone's permissions
+      # on the following update. If a certificate was supplied, insist it was used.
+      - name: Check the bundle
+        run: |
+          test -x dist/MacToys.app/Contents/MacOS/MacToys
+          plutil -lint dist/MacToys.app/Contents/Info.plist
+          test "$(plutil -extract CFBundleShortVersionString raw dist/MacToys.app/Contents/Info.plist)" \
+             = "${{ steps.version.outputs.version }}"
+
+          codesign --verify --deep --strict --verbose=2 dist/MacToys.app
+          AUTHORITY="$(codesign -dvv dist/MacToys.app 2>&1 | grep '^Authority=' || true)"
+          echo "${AUTHORITY:-Authority=(ad-hoc, none)}"
+
+          if [ "${{ steps.signing.outputs.available }}" = "true" ]; then
+            echo "$AUTHORITY" | grep -q "MacToys Release" || {
+              echo "::error::A signing certificate was configured but the bundle is not signed with it." >&2
+              echo "Shipping this would revoke every user's permissions on the next update." >&2
+              exit 1
+            }
+          fi
+
+      - name: Package
+        id: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP="MacToys-$VERSION.zip"
+          # ditto preserves the signature and resource forks; `zip` does not.
+          ditto -c -k --keepParent --sequesterRsrc dist/MacToys.app "$ZIP"
+          SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "$ZIP  $SHA"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            "${{ steps.package.outputs.zip }}" \
+            --title "MacToys ${{ steps.version.outputs.version }}" \
+            --notes-file .github/release-notes.md \
+            --generate-notes
+
+      # Done last, and allowed to fail: the release is already out, and a cask
+      # that lags by a commit is a much smaller problem than a blocked release.
+      - name: Point the Homebrew cask at this release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin main
+          git checkout main
+          python3 - <<'PY'
+          import pathlib, re
+          version = "${{ steps.version.outputs.version }}"
+          sha = "${{ steps.package.outputs.sha256 }}"
+          p = pathlib.Path("Casks/mactoys.rb")
+          s = p.read_text()
+          s = re.sub(r'version "[^"]*"', f'version "{version}"', s, count=1)
+          s = re.sub(r'sha256 "[^"]*"', f'sha256 "{sha}"', s, count=1)
+          p.write_text(s)
+          PY
+          if git diff --quiet Casks/mactoys.rb; then
+            echo "Cask already current."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/mactoys.rb
+          git commit -m "Point the Homebrew cask at ${{ steps.version.outputs.version }}"
+          git push origin main

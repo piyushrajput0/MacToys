@@ -17,23 +17,46 @@ One menu-bar app. No dependencies, no account, no network code.
 
 ## Install
 
-Needs macOS 13+. **Xcode is not required** — the Command Line Tools are enough.
+Needs macOS 13 or newer.
+
+```bash
+brew tap piyushrajput0/mactoys https://github.com/piyushrajput0/MacToys
+brew install --cask mactoys
+```
+
+Or [**download the latest release**][latest], unzip it, and drag `MacToys.app`
+into your Applications folder.
+
+MacToys then lives in the menu bar, and the Settings window opens on first
+launch so you can see everything it does.
+
+[latest]: https://github.com/piyushrajput0/MacToys/releases/latest
+
+### The first-launch warning
+
+macOS will say the developer cannot be verified. That is expected. MacToys is
+signed — just not with the $99/year Apple certificate that would make the
+warning go away. Open **System Settings → Privacy & Security**, scroll down, and
+click **Open Anyway**. You only ever do this once.
+
+To skip it, install with `brew install --cask --no-quarantine mactoys` instead.
+That tells macOS not to flag the download, so read the source first if that
+matters to you — it is 6,400 lines and there is no network code in any of them.
+
+### Building it yourself
 
 ```bash
 git clone https://github.com/piyushrajput0/MacToys.git
 cd MacToys
-make cert      # once: keeps permissions from resetting on every update
+make cert      # once: keeps permissions from resetting on every rebuild
 make install   # builds and installs to /Applications
-open /Applications/MacToys.app
 ```
 
-That's it. MacToys lives in the menu bar — the Settings window opens on first
-launch so you can see everything it does.
-
-> `make cert` creates a local signing certificate so macOS stops forgetting the
-> permissions you grant. It asks for your password, stays on your machine, and
-> gives nobody any access. Skip it and everything still works — you'll just have
-> to re-grant permissions after each update.
+Xcode is not required — the Command Line Tools are enough. `make cert` creates a
+local signing certificate so macOS stops forgetting the permissions you grant.
+It asks for your password, stays on your machine, and gives nobody any access.
+Skip it and everything still works; you will just re-grant permissions after
+each rebuild.
 
 ## What you get
 

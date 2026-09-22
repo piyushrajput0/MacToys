@@ -4,3 +4,4 @@
 dist/
 DerivedData/
 .DS_Store
+*.p12

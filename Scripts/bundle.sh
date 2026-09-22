@@ -10,7 +10,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${1:-release}"
 APP_NAME="MacToys"
 BUNDLE_ID="com.mactoys.MacToys"
-VERSION="1.0.0"
+# Overridable so the release workflow can stamp the tag it is building.
+VERSION="${MACTOYS_VERSION:-1.0.0}"
 
 cd "$ROOT"
 echo "==> Building ($CONFIG)"
@@ -57,7 +58,8 @@ fi
 # An ad-hoc signature changes on every rebuild, so every rebuild silently
 # revokes them. If Scripts/create-signing-identity.sh has been run there is a
 # stable certificate to use instead, and grants then survive rebuilds.
-IDENTITY="MacToys Self-Signed"
+# Overridable so CI can sign with the release identity instead of a local one.
+IDENTITY="${MACTOYS_SIGN_IDENTITY:-MacToys Self-Signed}"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
     echo "==> Signing with '$IDENTITY' (permissions persist across rebuilds)"
     codesign --force --sign "$IDENTITY" --timestamp=none "$APP" 2>&1 | sed 's/^/    /' || true
