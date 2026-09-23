@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Something not working, before filing anything
+    url: https://github.com/piyushrajput0/MacToys#permissions
+    about: Menu bar → Diagnostics says which features are genuinely running, and what to do about the ones that are not.
+  - name: Security or privacy issue
+    url: https://github.com/piyushrajput0/MacToys/blob/main/SECURITY.md
+    about: A clipboard manager sees everything you copy. Please report privately rather than in a public issue.

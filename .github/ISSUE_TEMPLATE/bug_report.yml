@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in MacToys does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else: open the menu bar icon, choose **Diagnostics**, and
+        press **Copy Report**. It checks every feature and says which ones are
+        genuinely running. Most reports are answerable from that alone.
+
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Which feature
+      options:
+        - Clipboard history
+        - Screenshot to clipboard (snip)
+        - Screen OCR / text extractor
+        - Colour picker
+        - Window snapping
+        - Trackpad volume gesture
+        - Windows key behaviour (⌘X/⌘V in Finder, Home/End, ⌦)
+        - Keyboard shortcuts / rebinding
+        - Menu bar icon or Settings
+        - Installing or updating
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: Menu bar → Diagnostics → Copy Report, then paste it here.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu → About This Mac. For example 14.5, or 26.1.
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: Which Mac
+      description: >
+        Also from About This Mac. Apple silicon and Intel behave differently for
+        some of this, and the trackpad gesture depends on the hardware.
+      placeholder: MacBook Air M2, or Mac mini 2018
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it
+      options:
+        - Homebrew
+        - Downloaded the zip from Releases
+        - Built it myself from source
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: permissions
+    attributes:
+      label: Permissions granted
+      description: >
+        System Settings → Privacy & Security. Tick what is actually switched on.
+        If Diagnostics disagrees with what you see here, say so — that mismatch
+        is itself the bug, and a useful one to hear about.
+      options:
+        - label: Accessibility
+        - label: Screen Recording

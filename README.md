@@ -130,8 +130,13 @@ make app    # build without installing
 ```
 
 The logic worth testing lives in `MacToysCore` and depends on nothing — no
-AppKit, no permissions — so it runs headless. See
-[docs/ENGINEERING.md](docs/ENGINEERING.md) for how the trickier parts work.
+AppKit, no permissions — so it runs headless.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers where code goes and the two rules that
+are not up for negotiation; [docs/ENGINEERING.md](docs/ENGINEERING.md) explains
+how the trickier parts work.
+
+Found something that affects other people's data? Please read
+[SECURITY.md](SECURITY.md) and report it privately rather than in an issue.
 
 ## License
 

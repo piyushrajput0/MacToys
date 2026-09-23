@@ -1,0 +1,33 @@
+name: Feature request
+description: Something macOS should do and does not
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        MacToys fills in things Windows did well and macOS never shipped. The
+        best requests name the Windows behaviour you are missing — that makes it
+        obvious what "done" looks like.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The task you are stuck on, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: What did this on Windows
+      description: The shortcut, PowerToys utility, or feature name, if there was one.
+      placeholder: Win+V, FancyZones, Alt+Tab, PowerToys Run
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead
+      description: >
+        Existing macOS behaviour, another app, a MacToys setting that nearly
+        does it. Useful for knowing whether this belongs in MacToys at all.
